@@ -1,0 +1,131 @@
+
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import time
+from process1 import Process1
+from process2 import Process2
+import time
+import datetime
+
+class App:
+    def __init__(self, root):
+        self.window = root
+        self.window.title("Process Automation")
+
+        # Checkbox variables
+        self.checkbox1_var = tk.BooleanVar()
+        self.checkbox2_var = tk.BooleanVar()
+
+        # Checkboxes
+        self.checkbox1 = tk.Checkbutton(self.window, text="Process 1", variable=self.checkbox1_var, command=self.toggle_browse1)
+        self.checkbox1.grid(row=1, column=1, sticky="w")
+
+        self.checkbox2 = tk.Checkbutton(self.window, text="Process 2", variable=self.checkbox2_var, command=self.toggle_browse2)
+        self.checkbox2.grid(row=2, column=1, sticky="w")
+
+        # Buttons
+        self.run_button = tk.Button(self.window, text="Run", command=self.run_processes)
+        self.run_button.grid(row=4, column=1, padx=5, pady=5)
+
+        self.clear_button = tk.Button(self.window, text="Clear All", command=self.clear_all)
+        self.clear_button.grid(row=4, column=2, padx=5, pady=5)
+
+        self.cancel_button = tk.Button(self.window, text="Cancel", command=self.window.quit)
+        self.cancel_button.grid(row=4, column=3, padx=5, pady=5)
+
+        # Initialize file path variables
+        self.filepath1 = ""
+        self.filepath2 = ""
+
+    def toggle_browse1(self):
+        if self.checkbox1_var.get():
+            self.browse_button1 = tk.Button(self.window, text="Browse", command=self.browse_file1)
+            self.browse_button1.grid(row=1, column=2, padx=5, pady=5)
+            self.filepath_label1 = tk.Label(self.window, text="")
+            self.filepath_label1.grid(row=1, column=3, padx=5, pady=5)
+            self.radio1 = tk.Radiobutton(self.window, state="disabled", value=1)
+            self.radio1.grid(row=1, column=4, padx=5, pady=5)
+        else:
+            if hasattr(self, 'browse_button1'):
+                self.browse_button1.grid_remove()
+            if hasattr(self, 'filepath_label1'):
+                self.filepath_label1.grid_remove()
+            if hasattr(self, 'radio1'):
+                self.radio1.grid_remove()
+
+    def toggle_browse2(self):
+        if self.checkbox2_var.get():
+            self.browse_button2 = tk.Button(self.window, text="Browse", command=self.browse_file2)
+            self.browse_button2.grid(row=2, column=2, padx=5, pady=5)
+            self.filepath_label2 = tk.Label(self.window, text="")
+            self.filepath_label2.grid(row=2, column=3, padx=5, pady=5)
+            self.radio2 = tk.Radiobutton(self.window, state="disabled", value=2)
+            self.radio2.grid(row=2, column=4, padx=5, pady=5)
+        else:
+            if hasattr(self, 'browse_button2'):
+                self.browse_button2.grid_remove()
+            if hasattr(self, 'filepath_label2'):
+                self.filepath_label2.grid_remove()
+            if hasattr(self, 'radio2'):
+                self.radio2.grid_remove()
+
+    def browse_file1(self):
+        self.filepath1 = filedialog.askdirectory()
+        if self.filepath1:
+            self.filepath_label1.config(text=self.filepath1)
+
+    def browse_file2(self):
+        self.filepath2 = filedialog.askdirectory()
+        if self.filepath2:
+            self.filepath_label2.config(text=self.filepath2)
+
+    def run_processes(self):
+        start_time = datetime.datetime.now()
+
+        if self.checkbox1_var.get() and self.filepath1:
+            process1 = Process1(self.filepath1)
+            process1.run()
+            self.radio1.config(bg="green")
+            self.window.update()
+            # messagebox.showinfo("Success", "Process 1 completed successfully.")
+
+        if self.checkbox2_var.get() and self.filepath2:
+            process2 = Process2(self.filepath2)
+            process2.run()
+            self.radio2.config(bg="green")
+            self.window.update()
+            # messagebox.showinfo("Success", "Process 2 completed successfully.")
+
+        end_time = datetime.datetime.now()
+        total_time = end_time - start_time
+        #show total time in minutes and seconds
+        total_time = total_time.total_seconds()
+        total_time = divmod(total_time, 60)
+        total_time = f"{int(total_time[0])} minutes {int(total_time[1])} seconds"
+        messagebox.showinfo("Total Time", f"Total time taken: {total_time}")
+
+    def clear_all(self):
+        self.checkbox1_var.set(False)
+        self.checkbox2_var.set(False)
+        self.filepath1 = ""
+        self.filepath2 = ""
+
+        if hasattr(self, 'browse_button1'):
+            self.browse_button1.grid_remove()
+        if hasattr(self, 'browse_button2'):
+            self.browse_button2.grid_remove()
+
+        if hasattr(self, 'filepath_label1'):
+            self.filepath_label1.config(text="")
+        if hasattr(self, 'filepath_label2'):
+            self.filepath_label2.config(text="")
+
+        if hasattr(self, 'radio1'):
+            self.radio1.grid_remove()
+        if hasattr(self, 'radio2'):
+            self.radio2.grid_remove()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = App(root)
+    root.mainloop()
