@@ -1,0 +1,24 @@
+import os
+import time
+
+class Process1:
+    def __init__(self, filepath):
+        self.filepath = filepath
+
+    def run(self):
+        print(f"Starting Process 1 for the main directory: {self.filepath}")
+        
+        # Iterate over all directories inside the given filepath
+        for root, dirs, files in os.walk(self.filepath):
+            for dir_name in dirs:
+                dir_path = os.path.join(root, dir_name)
+                print(f"Running Process 1 in folder: {dir_path}")
+                # Simulate process running time for each folder
+                time.sleep(5)
+                print(f"Process 1 completed for folder: {dir_path}")
+
+        print("All folders processed.")
+
+# Example usage:
+# process = Process1('/path/to/main/folder')
+# process.run()
