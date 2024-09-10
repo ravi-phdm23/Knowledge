@@ -1,0 +1,216 @@
+import pandas as pd
+import logging
+
+
+class DataFrameProcessor:
+    def __init__(self, source_output_info_path):
+        self.source_output_info_path = source_output_info_path
+        self.source_df = pd.read_excel(self.source_output_info_path, sheet_name='source_info')
+        self.output_df = pd.read_excel(self.source_output_info_path, sheet_name='output_info')
+
+    def parse_list_string(self, list_str):
+        """Convert comma-separated string into a list of strings."""
+        if isinstance(list_str, str):
+            return [col.strip() for col in list_str.split(',')]
+        return [list_str]  # If it's a single column, wrap it in a list
+
+    def read_source_info(self):
+        """Prepare the source information from the source_info sheet."""
+        grouped_df = self.source_df.groupby(['input_file_path', 'data_frame_name', 'excel_worksheet']).agg({
+            'columns': list,
+            'blank_defaults': list,
+            'types': list
+        }).reset_index()
+
+        source_info = []
+        for _, row in grouped_df.iterrows():
+            source_info.append({
+                'input_file_path': f"{row['input_file_path']}",
+                'data_frame_name': row['data_frame_name'],
+                'excel_worksheet': row['excel_worksheet'],  # Add the worksheet name here
+                'columns': row['columns'],
+                'blank_defaults': row['blank_defaults'],
+                'types': row['types']
+            })
+        return source_info
+
+    def read_output_info(self):
+        """Prepare the output information from the output_info sheet."""
+        grouped_df = self.output_df.groupby(['output_file_path']).agg({
+            'Target_dataframe': list,            
+            'output_columns': list,
+            'source_dataframe': list,
+            'input_columns': list,
+            'derivation_logic': list,
+            'Merge_Dataframe': list,
+            'left_on': list,
+            'right_on': list,
+            'how': list,
+            'merge_mapping_columns': list,
+            'blank_default': list
+        }).reset_index()
+
+        output_info = []
+        for _, row in grouped_df.iterrows():
+            output_info.append({
+                'output_file_path': f"{row['output_file_path']}",
+                'Target_dataframe': row['Target_dataframe'],
+                'output_columns': row['output_columns'],
+                'source_dataframe': row['source_dataframe'],
+                'input_columns': row['input_columns'],
+                'derivation_logic': row['derivation_logic'],
+                'Merge_Dataframe': row['Merge_Dataframe'],
+                'left_on': [self.parse_list_string(lo) for lo in row['left_on']],  # Handle left_on as list
+                'right_on': [self.parse_list_string(ro) for ro in row['right_on']],  # Handle right_on as list
+                'how': row['how'],
+                'merge_mapping_columns': row['merge_mapping_columns'],
+                'blank_default': row['blank_default']
+            })
+        return output_info
+
+    def generate_layer_script(self, output_python_file):
+        source_info = self.read_source_info()
+        output_info = self.read_output_info()
+
+        # Generate the layer_script.py dynamically
+        code_lines = [
+            "import pandas as pd",
+            "import logging",
+            "",
+            "logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')",
+            "",
+            "# Source Layer: Handles reading input files",
+            "class SourceLayer:",
+            "    def __init__(self, source_info):",
+            "        self.source_info = source_info",
+            "        self.dataframes = {}",
+            "",
+            "    def load_input_files(self):",
+            "        for info in self.source_info:",
+            "            file_path = info['input_file_path']",
+            "            if file_path.endswith('.xlsx') or file_path.endswith('.xls'):",
+            "                df = pd.read_excel(file_path, sheet_name=info['excel_worksheet'])",
+            "            else:",
+            "                df = pd.read_csv(file_path)",
+            "            for col, default in zip(info['columns'], info['blank_defaults']):",
+            "                df[col] = df[col].fillna(default)",
+            "            self.dataframes[info['data_frame_name']] = df",
+            "            logging.info(f\"Loaded data from {file_path} (Sheet: {info['excel_worksheet']}) into {info['data_frame_name']}\")",
+            "        return self.dataframes",
+            "",
+            "# Repair Layer: Applies transformations, logic, and merges",
+            "class RepairLayer:",
+            "    def __init__(self, output_info, dataframes):",
+            "        self.output_info = output_info",
+            "        self.dataframes = dataframes",
+            "",
+            "    def parse_list_string(self, list_str):",
+            "        '''Convert comma-separated string into a list of strings.'''",
+            "        if isinstance(list_str, str):",
+            "            return [col.strip() for col in list_str.split(',')]",
+            "        return [list_str]  # If it's a single column, wrap it in a list",
+            "",
+            "    def apply_direct_logic(self, df, output):",
+            "        for input_col, output_col, method, blank_default in zip(output['input_columns'], output['output_columns'], output['derivation_logic'], output['blank_default']):",
+            "            if method == 'direct':",
+            "                df[output_col] = df[input_col].fillna(blank_default)",
+            "                logging.info(f\"Populated {output_col} using direct logic from {input_col}.\")",
+            "                if input_col != output_col:",
+            "                    df.drop(columns=[input_col], inplace=True)",
+            "        return df",
+            "",
+            "    def apply_merge_logic(self, df, output):",
+            "        for output_col, method, merge_file, left_on, right_on, how, merge_input_col, blank_default in zip(",
+            "            output['output_columns'], output['derivation_logic'], output['Merge_Dataframe'],",
+            "            output['left_on'], output['right_on'], output['how'], output['merge_mapping_columns'], output['blank_default']):",
+            "            if method == 'merge' and merge_file != 'blank':",
+            "                merge_df = pd.read_excel(f'data/mapping/{merge_file}.xlsx')",
+            "",
+            "                # Ensure left_on and right_on are lists",
+            "                left_on = self.parse_list_string(','.join(left_on))",
+            "                right_on = self.parse_list_string(','.join(right_on))",
+            "",
+            "                # Append merge_input_col to right_on",
+            "                right_on.append(merge_input_col)",
+            "",
+            "                # Perform the merge",
+            "                df = pd.merge(df, merge_df[right_on], left_on=left_on, right_on=right_on[:-1], how=how)",
+            "",
+            "                # Rename the merged column to the output column",
+            "                df.rename(columns={merge_input_col: output_col}, inplace=True)",
+            "",
+            "                # Fill any blanks in the merged column",
+            "                df[output_col] = df[output_col].fillna(blank_default)",
+            "",
+            "                logging.info(f\"Populated and renamed {merge_input_col} to {output_col} using merge logic.\")",
+            "",
+            "                # Drop the right_on columns after merge",
+            "                for col in right_on:",
+            "                    if col in df.columns:",
+            "                        df.drop(columns=[col], inplace=True)",
+            "                        logging.info(f\"Dropped column {col} after merge.\")",
+            "        return df",
+            "",
+            "    def process_data(self):",
+            "        for output in self.output_info:",
+            "            source_df_name = output['source_dataframe'][0]",
+            "            if source_df_name in self.dataframes:",
+            "                df = self.dataframes[source_df_name].copy()",
+            "                df = self.apply_direct_logic(df, output)",
+            "                df = self.apply_merge_logic(df, output)",
+            "                self.dataframes[output['Target_dataframe'][0]] = df",
+            "            else:",
+            "                logging.error(f\"Source dataframe {source_df_name} not found.\")",
+            "        return self.dataframes",
+            "",
+            "# Report Layer: Handles saving output files",
+            "class ReportLayer:",
+            "    def __init__(self, processed_data):",
+            "        self.processed_data = processed_data",
+            "",
+            "    def save_output(self, output_info):",
+            "        for output in output_info:",
+            "            output_file_path = output['output_file_path']",
+            "            df = self.processed_data[output['Target_dataframe'][0]]",
+            "            df.to_excel(output_file_path, index=False)",
+            "            logging.info(f\"Saved output to {output_file_path}\")",
+            "",
+            "# Example usage",
+            "if __name__ == '__main__':",
+            "    source_info = ["
+        ]
+
+        # Add source info dynamically
+        for info in source_info:
+            code_lines.append(f"        {{'input_file_path': r'{info['input_file_path']}', 'data_frame_name': '{info['data_frame_name']}', 'excel_worksheet': '{info['excel_worksheet']}', 'columns': {info['columns']}, 'blank_defaults': {info['blank_defaults']}, 'types': {info['types']}}},")
+
+        code_lines.append("    ]")
+
+        # Add output info dynamically
+        code_lines.append("    output_info = [")
+        for output in output_info:
+            code_lines.append(f"        {{'output_file_path': r'{output['output_file_path']}','Target_dataframe': {output['Target_dataframe']}, 'output_columns': {output['output_columns']}, 'source_dataframe': {output['source_dataframe']}, 'input_columns': {output['input_columns']}, 'derivation_logic': {output['derivation_logic']}, 'Merge_Dataframe': {output['Merge_Dataframe']}, 'left_on': {output['left_on']}, 'right_on': {output['right_on']}, 'how': {output['how']}, 'merge_mapping_columns': {output['merge_mapping_columns']}, 'blank_default': {output['blank_default']}}},")
+        code_lines.append("    ]")
+        
+        code_lines.append("    source_layer = SourceLayer(source_info)")
+        code_lines.append("    dataframes = source_layer.load_input_files()")
+        code_lines.append("")
+        code_lines.append("    repair_layer = RepairLayer(output_info, dataframes)")
+        code_lines.append("    processed_data = repair_layer.process_data()")
+        code_lines.append("")
+        code_lines.append("    report_layer = ReportLayer(processed_data)")
+        code_lines.append("    report_layer.save_output(output_info)")
+        
+        # Write the generated script to the output file
+        with open(output_python_file, 'w') as f:
+            f.write("\n".join(code_lines))
+        
+        print(f"Python script has been generated and saved to {output_python_file}")
+
+
+# Example usage
+source_output_info_path = 'source_output_info.xlsx'  # Path to the Excel file
+output_python_file = 'layer_script_generated.py'  # Output Python script path
+
+processor = DataFrameProcessor(source_output_info_path)
+processor.generate_layer_script(output_python_file)
