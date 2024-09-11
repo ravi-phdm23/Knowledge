@@ -1,0 +1,192 @@
+import os
+import pandas as pd
+import logging
+from openpyxl import load_workbook
+from openpyxl.styles import PatternFill
+
+# Set up logging to both file and console
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# File handler for logging
+file_handler = logging.FileHandler('source_info_population.log')
+file_handler.setLevel(logging.INFO)
+
+# Console handler for logging to terminal
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+
+# Formatter for both handlers
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+console_handler.setFormatter(formatter)
+
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
+
+# Define fill colors for highlighting differences
+red_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+green_fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")
+
+
+def get_file_list(directory):
+    """Recursively get the list of all Excel files from the directory and its subdirectories."""
+    excel_files = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            # Ignore temporary files starting with '~$'
+            if file.startswith('~$'):
+                continue
+            if file.endswith('.xlsx') or file.endswith('.xls'):
+                excel_files.append(os.path.join(root, file))
+    return excel_files
+
+
+def get_excel_sheet_info(file_path, month_label):
+    """Get sheet names, column headers, and count null/not null values from an Excel workbook."""
+    logger.info(f"Processing Excel file: {file_path}")
+    sheet_info = []
+    file_name = os.path.splitext(os.path.basename(file_path))[0]  # Get the file name without extension
+
+    try:
+        # Load the Excel file
+        xls = pd.ExcelFile(file_path, engine='openpyxl')
+
+        # Process each sheet
+        for sheet_name in xls.sheet_names:
+            # Read all rows of the sheet into a DataFrame
+            df = pd.read_excel(file_path, sheet_name=sheet_name)
+            columns = df.columns.tolist()
+
+            # Count null and non-null values for each column
+            null_counts = df.isnull().sum().tolist()
+            not_null_counts = df.notnull().sum().tolist()
+
+            # Construct the DataFrame name using the file name and sheet name
+            df_name = f"{file_name}_{sheet_name}"
+
+            # Append relevant info to the sheet_info list
+            for col, null_count, not_null_count in zip(columns, null_counts, not_null_counts):
+                sheet_info.append([df_name, col, null_count, not_null_count, file_path, month_label])
+
+        logger.info(f"Successfully processed Excel file: {file_path}")
+    except Exception as e:
+        logger.error(f"Error processing Excel file: {file_path}, Error: {e}")
+
+    return sheet_info
+
+
+def ensure_numeric(df, columns):
+    """
+    Ensure that the specified columns are numeric. If not, coerce them to 0 and log the rows where conversion fails.
+    """
+    for col in columns:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+        # Log rows where conversion was necessary
+        problematic_rows = df[df[col] == 0]
+        if not problematic_rows.empty:
+            logger.warning(f"Found non-numeric values in column {col}. These rows were coerced to 0: {problematic_rows}")
+
+
+def calculate_percentage_change(current, previous):
+    """Calculate percentage change between current and previous values."""
+    if previous == 0 and current == 0:
+        return 0
+    if previous == 0:
+        return 100
+    return ((current - previous) / previous) * 100
+
+
+def compare_months(current_month_dir, previous_month_dir, output_file):
+    """Compare current and previous month data and write the result to an Excel file."""
+    # Get the file lists for both months
+    current_files = get_file_list(current_month_dir)
+    previous_files = get_file_list(previous_month_dir)
+
+    # Process both months into separate DataFrames
+    current_data = []
+    previous_data = []
+
+    for file in current_files:
+        current_data.extend(get_excel_sheet_info(file, "current"))
+
+    for file in previous_files:
+        previous_data.extend(get_excel_sheet_info(file, "previous"))
+
+    # Convert both current and previous data into DataFrames
+    current_df = pd.DataFrame(current_data, columns=[
+        'data_frame_name', 'column', 'current_null_count', 'current_not_null_count', 'current_month_file_path', 'month_label'
+    ])
+
+    previous_df = pd.DataFrame(previous_data, columns=[
+        'data_frame_name', 'column', 'previous_null_count', 'previous_not_null_count', 'previous_month_file_path', 'month_label'
+    ])
+
+    # Ensure null and not null counts are numeric
+    ensure_numeric(current_df, ['current_null_count', 'current_not_null_count'])
+    ensure_numeric(previous_df, ['previous_null_count', 'previous_not_null_count'])
+
+    # Merge the DataFrames on 'data_frame_name' and 'column'
+    comparison_df = pd.merge(current_df, previous_df, on=['data_frame_name', 'column'], how='outer')
+
+    # Fill missing values with 0 for counts
+    comparison_df.fillna({
+        'current_null_count': 0, 'current_not_null_count': 0,
+        'previous_null_count': 0, 'previous_not_null_count': 0,
+        'current_month_file_path': "Missing in Current Month",
+        'previous_month_file_path': "Missing in Previous Month"
+    }, inplace=True)
+
+    # Calculate percentage changes
+    comparison_df['null_percentage_change'] = comparison_df.apply(
+        lambda row: calculate_percentage_change(row['current_null_count'], row['previous_null_count']), axis=1)
+
+    comparison_df['not_null_percentage_change'] = comparison_df.apply(
+        lambda row: calculate_percentage_change(row['current_not_null_count'], row['previous_not_null_count']), axis=1)
+
+    # Remove unwanted columns like 'month_label_x', 'month_label_y'
+    comparison_df.drop(['month_label_x', 'month_label_y'], axis=1, inplace=True, errors='ignore')
+
+    # Reorder columns as per the request
+    comparison_df = comparison_df[[
+        'current_month_file_path', 'previous_month_file_path', 'data_frame_name', 'column',
+        'current_null_count', 'previous_null_count', 'null_percentage_change',
+        'current_not_null_count', 'previous_not_null_count', 'not_null_percentage_change'
+    ]]
+
+    # Write to Excel and apply conditional formatting
+    try:
+        with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+            comparison_df.to_excel(writer, sheet_name='comparison', index=False)
+            wb = writer.book
+            ws = wb['comparison']
+
+            # Apply conditional formatting for percentage changes
+            for row in range(2, len(comparison_df) + 2):  # Start from row 2 (row 1 is the header)
+                null_change_cell = ws.cell(row=row, column=7)  # 7th column is null_percentage_change
+                not_null_change_cell = ws.cell(row=row, column=10)  # 10th column is not_null_percentage_change
+
+                # Apply red fill for percentage change > 5%, green for <= 5%
+                if isinstance(null_change_cell.value, (int, float)):
+                    if null_change_cell.value > 5:
+                        null_change_cell.fill = red_fill
+                    else:
+                        null_change_cell.fill = green_fill
+
+                if isinstance(not_null_change_cell.value, (int, float)):
+                    if not_null_change_cell.value > 5:
+                        not_null_change_cell.fill = red_fill
+                    else:
+                        not_null_change_cell.fill = green_fill
+
+        logger.info(f"Successfully wrote the comparison result to {output_file}")
+    except Exception as e:
+        logger.error(f"Error writing the comparison result to {output_file}, Error: {e}")
+
+
+# Example usage
+current_month_dir = 'data folder new/current_month'  # Replace with the path to the current month folder
+previous_month_dir = 'data folder new/previous_month'  # Replace with the path to the previous month folder
+output_file = 'comparison_output.xlsx'  # Replace with the desired output file path
+
+compare_months(current_month_dir, previous_month_dir, output_file)
