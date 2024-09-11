@@ -1,0 +1,127 @@
+
+import os
+import pandas as pd
+import logging
+
+# Set up logging to both file and console
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# File handler for logging
+file_handler = logging.FileHandler('source_info_population.log')
+file_handler.setLevel(logging.INFO)
+
+# Console handler for logging to terminal
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+
+# Formatter for both handlers
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+console_handler.setFormatter(formatter)
+
+# Adding both handlers to the logger
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
+
+
+def get_excel_sheet_info(file_path):
+    """Get sheet names, column headers, data types, and count null/not null values from an Excel workbook."""
+    logger.info(f"Processing Excel file: {file_path}")
+    sheet_info = []
+    file_name = os.path.splitext(os.path.basename(file_path))[0]  # Get the file name without extension
+    relative_path = os.path.relpath(file_path, 'data folder')  # Use the correct directory
+
+    try:
+        # Load the Excel file
+        xls = pd.ExcelFile(file_path, engine='openpyxl')
+
+        # Process each sheet
+        for sheet_name in xls.sheet_names:
+            # Read all rows of the sheet into a DataFrame
+            df = pd.read_excel(file_path, sheet_name=sheet_name)
+            columns = df.columns.tolist()
+
+            # Count null and non-null values for each column
+            null_counts = df.isnull().sum().tolist()
+            not_null_counts = df.notnull().sum().tolist()
+
+            # Get data types
+            dtypes = df.dtypes.tolist()
+            # Determine blank defaults
+            blank_defaults = ['blank' if pd.api.types.is_object_dtype(dtype) else 0 for dtype in dtypes]
+
+            # Construct the DataFrame name using the file name and sheet name
+            df_name = f"{file_name}_{sheet_name}"
+
+            # Append relevant info to the sheet_info list
+            for col, dtype, blank_default, null_count, not_null_count in zip(columns, dtypes, blank_defaults, null_counts, not_null_counts):
+                sheet_info.append([
+                    relative_path,  # input_file_path
+                    sheet_name,  # excel_worksheet
+                    df_name,  # data_frame_name
+                    col,  # columns
+                    blank_default,  # blank_defaults
+                    str(dtype),  # types
+                    null_count,  # null_count
+                    not_null_count  # not_null_count
+                ])
+
+        logger.info(f"Successfully processed Excel file: {file_path}")
+    except Exception as e:
+        logger.error(f"Error processing Excel file: {file_path}, Error: {e}")
+
+    return sheet_info
+
+
+def get_file_list(directory):
+    """Recursively get the list of all Excel and CSV files from the directory and its subdirectories."""
+    logger.info(f"Scanning directory: {directory}")
+    excel_files = []
+    csv_files = []
+
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            # Ignore temporary files that start with '~$'
+            if file.startswith('~$'):
+                continue
+            if file.endswith('.xlsx') or file.endswith('.xls'):
+                excel_files.append(os.path.join(root, file))
+            elif file.endswith('.csv'):
+                csv_files.append(os.path.join(root, file))
+
+    logger.info(f"Found {len(excel_files)} Excel files and {len(csv_files)} CSV files.")
+    return excel_files, csv_files
+
+
+def populate_source_info(directory, output_file):
+    """Populate the source_info tab with details from Excel and CSV files."""
+    logger.info("Starting source info population process")
+    source_info_data = []
+
+    # Get the list of files from all subdirectories
+    excel_files, csv_files = get_file_list(directory)
+
+    # Process Excel files
+    for excel_file in excel_files:
+        sheet_info = get_excel_sheet_info(excel_file)
+        source_info_data.extend(sheet_info)
+
+    # Convert the list to a DataFrame
+    source_info_df = pd.DataFrame(source_info_data, columns=[
+        'input_file_path', 'excel_worksheet', 'data_frame_name', 'columns', 'blank_defaults', 'types', 'null_count', 'not_null_count'
+    ])
+
+    # Use pandas to_excel directly to write or overwrite the output Excel file
+    try:
+        source_info_df.to_excel(output_file, sheet_name='source_info', index=False)
+        logger.info(f"Successfully wrote to output file: {output_file}")
+    except Exception as e:
+        logger.error(f"Error writing to output file: {output_file}, Error: {e}")
+
+
+# Example usage
+directory = 'data folder'  # Use the correct directory name
+output_file = 'source_output_info.xlsx'  # Replace with your desired output file path
+
+populate_source_info(directory, output_file)
