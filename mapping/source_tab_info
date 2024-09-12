@@ -105,7 +105,7 @@ def get_file_list(directory):
                 continue
             if file.endswith('.xlsx') or file.endswith('.xls'):
                 excel_files.append(os.path.join(root, file))
-            elif file.endswith('.csv'):
+            elif file.endswith('.csv') or file.endswith('.CSV'):
                 csv_files.append(os.path.join(root, file))
 
     print(f"Found {len(excel_files)} Excel files and {len(csv_files)} CSV files.")
@@ -134,13 +134,13 @@ def populate_source_info(directory, output_file):
         'input_file_path', 'excel_worksheet', 'data_frame_name', 'columns', 'blank_defaults', 'types', 'null_count', 'not_null_count'
     ])
 
-    # Use pandas to_excel directly to write or overwrite the output Excel file
     try:
-        source_info_df.to_excel(output_file, sheet_name='source_info', index=False)
-        print(f"Successfully wrote to output file: {output_file}")
+        # Load the existing Excel file to preserve other sheets
+        with pd.ExcelWriter(output_file, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+            source_info_df.to_excel(writer, sheet_name='source_info', index=False)
+        print(f"Successfully wrote to the 'source_info' tab in the output file: {output_file}")
     except Exception as e:
         print(f"Error writing to output file: {output_file}, Error: {e}")
-
 
 # Example usage
 directory = 'data folder'  # Use the correct directory name
