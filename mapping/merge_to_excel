@@ -1,0 +1,79 @@
+import json
+import re
+import pandas as pd
+
+def extract_merge_info_from_ipynb(file_path):
+    """
+    Extract merge information from a Jupyter Notebook (.ipynb).
+    Parses through the notebook code to find merge operations and collects details.
+    """
+    with open(file_path, 'r', encoding='utf-8') as f:
+        notebook_content = json.load(f)
+
+    # Initialize a list to store the extracted information
+    merge_info = []
+
+    # Regex pattern to capture pd.merge operations
+    merge_pattern = re.compile(r'pd\.merge\((.*?),\s*(.*?)\,\s*left_on\s*=\s*(.*?)\,\s*right_on\s*=\s*(.*?)\,\s*how\s*=\s*(.*?)\)', re.DOTALL)
+
+    # Loop through all cells in the notebook
+    for cell in notebook_content['cells']:
+        if cell['cell_type'] == 'code':
+            # Extract the code from the cell
+            cell_source = ''.join(cell['source'])
+            
+            # Find all occurrences of pd.merge in the code
+            for match in merge_pattern.findall(cell_source):
+                left_df, right_df, left_on, right_on, how = match
+
+                # Clean up and format the merge information
+                left_on = left_on.replace("'", "").replace("[", "").replace("]", "").strip()
+                right_on = right_on.replace("'", "").replace("[", "").replace("]", "").strip()
+                how = how.replace("'", "").strip()
+
+                # Store the information in a dictionary
+                merge_info.append({
+                    'Merge_Dataframe': right_df.strip(),
+                    'left_on': left_on,
+                    'right_on': right_on,
+                    'how': how,
+                })
+
+    return merge_info
+
+def save_merge_info_to_excel(merge_info, output_file):
+    """
+    Save the extracted merge information to an Excel file in a specific format.
+    """
+    # Create a DataFrame from the merge info
+    df = pd.DataFrame(merge_info)
+
+    # Add additional columns to match the desired format
+    df['output_file_path'] = 'data/output/output_01.xlsx'
+    df['Target_dataframe'] = 'output_01'
+    df['output_columns'] = ['output_a' + str(i) for i in range(1, len(df) + 1)]
+    df['source_dataframe'] = 'input_01'
+    df['input_columns'] = ['blank' for _ in range(len(df))]
+    df['derivation_logic'] = ['merge' for _ in range(len(df))]
+    df['merge_mapping_columns'] = df['right_on']  # Assuming 'right_on' provides merge mapping columns
+    df['blank_default'] = ['blank' for _ in range(len(df))]
+
+    # Reorder columns to match the desired format
+    df = df[['output_file_path', 'Target_dataframe', 'output_columns', 'source_dataframe',
+             'input_columns', 'derivation_logic', 'Merge_Dataframe', 'left_on', 'right_on',
+             'how', 'merge_mapping_columns', 'blank_default']]
+
+    # Save to Excel
+    df.to_excel(output_file, index=False)
+
+# Example usage:
+ipynb_file = 'sample.ipynb'  # Path to your .ipynb file
+output_excel = 'merge_info_output.xlsx'  # Path to the output Excel file
+
+# Extract merge information
+merge_info = extract_merge_info_from_ipynb(ipynb_file)
+
+# Save the extracted information to an Excel file
+save_merge_info_to_excel(merge_info, output_excel)
+
+print(f"Merge information extracted and saved to {output_excel}")
