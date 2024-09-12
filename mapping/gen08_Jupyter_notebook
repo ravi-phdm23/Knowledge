@@ -197,11 +197,67 @@ class RepairLayer:
 
         return df
 
+
     def process_data(self):
         for output in self.output_info:
             source_df_name = output['source_dataframe'][0]
             if source_df_name in self.dataframes:
                 df = self.dataframes[source_df_name].copy()
-                df, direct_input_columns = self.apply_direct_logic(df, output)
-                df = self.apply_merge_logic(df, output, direct_input_columns)
-                self.dataframes[output['Target_dataframe'][0
+                df = self.apply_direct_logic(df, output)
+                df = self.apply_merge_logic(df, output, df.columns)
+                self.dataframes[output['Target_dataframe'][0]] = df
+            else:
+                print(f"ERROR: Source dataframe {source_df_name} not found.")
+                logging.error(f"Source dataframe {source_df_name} not found.")
+        return self.dataframes        
+        """))
+
+        # Add the markdown cell to describe the report layer
+        nb.cells.append(nbf.v4.new_markdown_cell("## Report Layer\nThis section of the code handles saving the output files."))
+
+        # Add the code for the Report Layer with print statements for logs
+        nb.cells.append(nbf.v4.new_code_cell("""
+class ReportLayer:
+    def __init__(self, processed_data):
+        self.processed_data = processed_data
+
+    def save_output(self, output_info):
+        for output in output_info:
+            output_file_path = output['output_file_path']
+            df = self.processed_data[output['Target_dataframe'][0]]
+            df.to_excel(output_file_path, index=False)
+            print(f"SUCCESS: Saved output to {output_file_path}")
+            logging.info(f"Saved output to {output_file_path}")
+        """))
+
+        # Add a final code cell for the example usage
+        nb.cells.append(nbf.v4.new_markdown_cell("## Example Usage\nThis section shows how to use the classes defined above."))
+
+        nb.cells.append(nbf.v4.new_code_cell(f"""
+if __name__ == '__main__':
+    source_info = {source_info}
+    output_info = {output_info}
+    
+    source_layer = SourceLayer(source_info)
+    dataframes = source_layer.load_input_files()
+
+    repair_layer = RepairLayer(output_info, dataframes)
+    processed_data = repair_layer.process_data()
+
+    report_layer = ReportLayer(processed_data)
+    report_layer.save_output(output_info)
+    """))
+
+        # Save the notebook
+        with open(output_notebook_file, 'w') as f:
+            nbf.write(nb, f)
+
+        print(f"Jupyter notebook has been generated and saved to {output_notebook_file}")
+
+# Example usage
+source_output_info_path = 'source_output_info.xlsx'  # Path to the Excel file
+output_notebook_file = 'layer_script_generated.ipynb'  # Output Jupyter Notebook path
+
+processor = DataFrameProcessor(source_output_info_path)
+processor.generate_layer_notebook(output_notebook_file)
+
