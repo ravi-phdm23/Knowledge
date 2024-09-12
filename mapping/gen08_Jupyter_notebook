@@ -203,8 +203,8 @@ class RepairLayer:
             source_df_name = output['source_dataframe'][0]
             if source_df_name in self.dataframes:
                 df = self.dataframes[source_df_name].copy()
-                df = self.apply_direct_logic(df, output)
-                df = self.apply_merge_logic(df, output, df.columns)
+                df, direct_input_columns = self.apply_direct_logic(df, output)
+                df = self.apply_merge_logic(df, output, direct_input_columns)
                 self.dataframes[output['Target_dataframe'][0]] = df
             else:
                 print(f"ERROR: Source dataframe {source_df_name} not found.")
