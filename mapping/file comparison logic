@@ -30,8 +30,9 @@ green_fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="so
 
 
 def get_file_list(directory):
-    """Recursively get the list of all Excel files from the directory and its subdirectories."""
+    """Recursively get the list of all Excel and CSV files from the directory and its subdirectories."""
     excel_files = []
+    csv_files = []
     for root, dirs, files in os.walk(directory):
         for file in files:
             # Ignore temporary files starting with '~$'
@@ -39,14 +40,17 @@ def get_file_list(directory):
                 continue
             if file.endswith('.xlsx') or file.endswith('.xls'):
                 excel_files.append(os.path.join(root, file))
-    return excel_files
+            elif file.endswith('.csv') or file.endswith('.CSV'):
+                csv_files.append(os.path.join(root, file))
+    return excel_files, csv_files
 
 
 def get_excel_sheet_info(file_path, month_label):
     """Get sheet names, column headers, and count null/not null values from an Excel workbook."""
     logger.info(f"Processing Excel file: {file_path}")
     sheet_info = []
-    file_name = os.path.splitext(os.path.basename(file_path))[0]  # Get the file name without extension
+    # Convert the file path to a string where '/', '\', ' ', and '.' are replaced with '_'
+    df_name_base = file_path.replace(os.sep, '_').replace('/', '_').replace(' ', '_').replace('.', '_').replace('current', '').replace('previous', '')  
 
     try:
         # Load the Excel file
@@ -62,8 +66,8 @@ def get_excel_sheet_info(file_path, month_label):
             null_counts = df.isnull().sum().tolist()
             not_null_counts = df.notnull().sum().tolist()
 
-            # Construct the DataFrame name using the file name and sheet name
-            df_name = f"{file_name}_{sheet_name}"
+            # Construct the DataFrame name using the modified file path and sheet name
+            df_name = f"{df_name_base}_{sheet_name}_source_df"
 
             # Append relevant info to the sheet_info list
             for col, null_count, not_null_count in zip(columns, null_counts, not_null_counts):
@@ -100,17 +104,17 @@ def calculate_percentage_change(current, previous):
 def compare_months(current_month_dir, previous_month_dir, output_file):
     """Compare current and previous month data and write the result to an Excel file."""
     # Get the file lists for both months
-    current_files = get_file_list(current_month_dir)
-    previous_files = get_file_list(previous_month_dir)
+    current_excel_files, current_csv_files = get_file_list(current_month_dir)
+    previous_excel_files, previous_csv_files = get_file_list(previous_month_dir)
 
     # Process both months into separate DataFrames
     current_data = []
     previous_data = []
 
-    for file in current_files:
+    for file in current_excel_files:
         current_data.extend(get_excel_sheet_info(file, "current"))
 
-    for file in previous_files:
+    for file in previous_excel_files:
         previous_data.extend(get_excel_sheet_info(file, "previous"))
 
     # Convert both current and previous data into DataFrames
