@@ -1,6 +1,7 @@
 import customtkinter as ctk  # Using customtkinter for modern UI
 from tkinter import filedialog, ttk, messagebox  # Import the standard messagebox
 import os
+import sys
 import subprocess
 import process1
 import process2
@@ -201,9 +202,14 @@ class App:
             return
 
         try:
-            # Run the selected Python file with the current browse path and output folder
-            subprocess.run(['python', python_file, self.filepath1_current, output_folder])
-            messagebox.showinfo("Success", f"{PROCESS_1_NAME} completed successfully. Output saved in {output_folder}.")
+            # Convert paths to absolute paths
+            python_file_abs = os.path.abspath(python_file)
+            output_folder_abs = os.path.abspath(output_folder)
+            filepath1_current_abs = os.path.abspath(self.filepath1_current)
+
+            # Run the selected Python file with the absolute paths
+            subprocess.run([sys.executable, python_file_abs, filepath1_current_abs, output_folder_abs])
+            messagebox.showinfo("Success", f"{PROCESS_1_NAME} completed successfully. Output saved in {output_folder_abs}.")
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred during {PROCESS_1_NAME} execution: {e}")
 
@@ -220,9 +226,14 @@ class App:
             return
 
         try:
-            # Run the selected Python file with the current browse path and output folder
-            subprocess.run(['python', python_file, self.filepath2_current, output_folder])
-            messagebox.showinfo("Success", f"{PROCESS_2_NAME} completed successfully. Output saved in {output_folder}.")
+            # Convert paths to absolute paths
+            python_file_abs = os.path.abspath(python_file)
+            output_folder_abs = os.path.abspath(output_folder)
+            filepath2_current_abs = os.path.abspath(self.filepath2_current)
+
+            # Run the selected Python file with the absolute paths
+            subprocess.run([sys.executable, python_file_abs, filepath2_current_abs, output_folder_abs])
+            messagebox.showinfo("Success", f"{PROCESS_2_NAME} completed successfully. Output saved in {output_folder_abs}.")
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred during {PROCESS_2_NAME} execution: {e}")
 
