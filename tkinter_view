@@ -34,8 +34,8 @@ class App:
         self.browse_button1_previous = ctk.CTkButton(self.window, text="Browse Previous Period", command=self.browse_file1_previous)
         self.browse_button1_previous.grid(row=1, column=3, padx=10, pady=10)
 
-        # "Validate Input Data" button for Process 1
-        self.validate_button1 = ctk.CTkButton(self.window, text="Validate Input Data", command=self.validate_input_data1)
+        # "Validation Template" button for Process 1 (Renamed)
+        self.validate_button1 = ctk.CTkButton(self.window, text="Validation Template", command=self.validate_input_data1)
         self.validate_button1.grid(row=1, column=4, padx=10, pady=10)
 
         # "Run Process" button for Process 1
@@ -56,8 +56,8 @@ class App:
         self.browse_button2_previous = ctk.CTkButton(self.window, text="Browse Previous Period", command=self.browse_file2_previous)
         self.browse_button2_previous.grid(row=4, column=3, padx=10, pady=10)
 
-        # "Validate Input Data" button for Process 2
-        self.validate_button2 = ctk.CTkButton(self.window, text="Validate Input Data", command=self.validate_input_data2)
+        # "Validation Template" button for Process 2 (Renamed)
+        self.validate_button2 = ctk.CTkButton(self.window, text="Validation Template", command=self.validate_input_data2)
         self.validate_button2.grid(row=4, column=4, padx=10, pady=10)
 
         # "Run Process" button for Process 2
@@ -148,40 +148,30 @@ class App:
 
     def validate_input_data1(self):
         """Validate input data for Process 1"""
-        if not self.filepath1_current or not self.filepath1_previous:
-            messagebox.showerror("Error", "Please select both Current and Previous period directories for Process 1.")
+        # Ask for validation input template (xlsx)
+        validation_file = filedialog.askopenfilename(title="Select Validation Input Template", filetypes=[("Excel files", "*.xlsx")])
+        if not validation_file:
+            messagebox.showerror("Error", "Please select a validation input template (xlsx).")
             return
-
-        output_folder = filedialog.askdirectory(title="Select Output Folder")
-        if not output_folder:
-            messagebox.showerror("Error", "Please select an output folder.")
-            return
-
-        output_file = os.path.join(output_folder, 'Input_data_periodic_comparison_process1.xlsx')
 
         try:
-            # Call the compare_months function
-            compare_months(self.filepath1_current, self.filepath1_previous, output_file)
+            # Pass the validation file directly for processing without asking for output folder
+            compare_months(validation_file, self.filepath1_previous, validation_file)  # Output path same as input file path
             messagebox.showinfo("Success", "Process 1 validation completed successfully.")
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred during Process 1 validation: {e}")
 
     def validate_input_data2(self):
         """Validate input data for Process 2"""
-        if not self.filepath2_current or not self.filepath2_previous:
-            messagebox.showerror("Error", "Please select both Current and Previous period directories for Process 2.")
+        # Ask for validation input template (xlsx)
+        validation_file = filedialog.askopenfilename(title="Select Validation Input Template", filetypes=[("Excel files", "*.xlsx")])
+        if not validation_file:
+            messagebox.showerror("Error", "Please select a validation input template (xlsx).")
             return
-
-        output_folder = filedialog.askdirectory(title="Select Output Folder")
-        if not output_folder:
-            messagebox.showerror("Error", "Please select an output folder.")
-            return
-
-        output_file = os.path.join(output_folder, 'Input_data_periodic_comparison_process2.xlsx')
 
         try:
-            # Call the compare_months function
-            compare_months(self.filepath2_current, self.filepath2_previous, output_file)
+            # Pass the validation file directly for processing without asking for output folder
+            compare_months(validation_file, self.filepath2_previous, validation_file)  # Output path same as input file path
             messagebox.showinfo("Success", "Process 2 validation completed successfully.")
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred during Process 2 validation: {e}")
