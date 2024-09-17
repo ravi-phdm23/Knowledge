@@ -1,0 +1,249 @@
+import customtkinter as ctk  # Using customtkinter for modern UI
+from tkinter import filedialog, ttk, messagebox  # Import the standard messagebox
+import os
+import subprocess
+import process1
+import process2
+from file_comparison_logic_01 import compare_months  # Import the function from the comparison logic file
+
+class App:
+    def __init__(self, root):
+        ctk.set_appearance_mode("dark")  # Modes: system (default), light, dark
+        ctk.set_default_color_theme("blue")  # Themes: blue (default), dark-blue, green
+
+        self.window = root
+        self.window.title("Process Automation")
+        self.window.geometry("1000x700")  # Increase window size
+
+        # Configuring grid to make the Treeview auto-resizable
+        self.window.grid_columnconfigure(1, weight=1)
+        self.window.grid_rowconfigure(10, weight=1)  # Adjust grid to accommodate all buttons and frames
+
+        # Checkbox variables
+        self.checkbox1_var = ctk.BooleanVar()
+        self.checkbox2_var = ctk.BooleanVar()
+
+        # Checkboxes and buttons for Process 1
+        self.checkbox1 = ctk.CTkCheckBox(self.window, text="Process 1", variable=self.checkbox1_var, command=self.toggle_browse1)
+        self.checkbox1.grid(row=1, column=1, sticky="w", padx=10, pady=10)
+
+        # "Browse" buttons for Process 1 (Current Period and Previous Period)
+        self.browse_button1_current = ctk.CTkButton(self.window, text="Browse Current Period", command=self.browse_file1_current)
+        self.browse_button1_current.grid(row=1, column=2, padx=10, pady=10)
+
+        self.browse_button1_previous = ctk.CTkButton(self.window, text="Browse Previous Period", command=self.browse_file1_previous)
+        self.browse_button1_previous.grid(row=1, column=3, padx=10, pady=10)
+
+        # "Validate Input Data" button for Process 1
+        self.validate_button1 = ctk.CTkButton(self.window, text="Validate Input Data", command=self.validate_input_data1)
+        self.validate_button1.grid(row=1, column=4, padx=10, pady=10)
+
+        # "Run Process" button for Process 1
+        self.run_process_button1 = ctk.CTkButton(self.window, text="Run Process", command=self.run_process1)
+        self.run_process_button1.grid(row=1, column=5, padx=10, pady=10)
+
+        # Placeholder for the folder structure Treeview for Process 1 (initially empty)
+        self.treeview1 = None
+
+        # Checkbox and buttons for Process 2
+        self.checkbox2 = ctk.CTkCheckBox(self.window, text="Process 2", variable=self.checkbox2_var, command=self.toggle_browse2)
+        self.checkbox2.grid(row=4, column=1, sticky="w", padx=10, pady=10)
+
+        # "Browse" buttons for Process 2 (Current Period and Previous Period)
+        self.browse_button2_current = ctk.CTkButton(self.window, text="Browse Current Period", command=self.browse_file2_current)
+        self.browse_button2_current.grid(row=4, column=2, padx=10, pady=10)
+
+        self.browse_button2_previous = ctk.CTkButton(self.window, text="Browse Previous Period", command=self.browse_file2_previous)
+        self.browse_button2_previous.grid(row=4, column=3, padx=10, pady=10)
+
+        # "Validate Input Data" button for Process 2
+        self.validate_button2 = ctk.CTkButton(self.window, text="Validate Input Data", command=self.validate_input_data2)
+        self.validate_button2.grid(row=4, column=4, padx=10, pady=10)
+
+        # "Run Process" button for Process 2
+        self.run_process_button2 = ctk.CTkButton(self.window, text="Run Process", command=self.run_process2)
+        self.run_process_button2.grid(row=4, column=5, padx=10, pady=10)
+
+        # Initialize file path variables for Current and Previous periods
+        self.filepath1_current = ""
+        self.filepath1_previous = ""
+        self.filepath2_current = ""
+        self.filepath2_previous = ""
+
+        # Treeview for folder structure for Process 2
+        self.treeview2 = None
+
+    def toggle_browse1(self):
+        if self.checkbox1_var.get():
+            # Create Treeview for Process 1 if not exists
+            if not self.treeview1:
+                self.treeview1 = ttk.Treeview(self.window)
+                self.treeview1.grid(row=2, column=1, columnspan=3, padx=10, pady=10, sticky="nsew")
+        else:
+            if self.treeview1:
+                self.treeview1.grid_remove()
+
+    def toggle_browse2(self):
+        if self.checkbox2_var.get():
+            # Create Treeview for Process 2 if not exists
+            if not self.treeview2:
+                self.treeview2 = ttk.Treeview(self.window)
+                self.treeview2.grid(row=5, column=1, columnspan=3, padx=10, pady=10, sticky="nsew")
+        else:
+            if self.treeview2:
+                self.treeview2.grid_remove()
+
+    def browse_file1_current(self):
+        self.filepath1_current = filedialog.askdirectory()
+        if self.filepath1_current:
+            if self.treeview1:
+                self.treeview1.grid_remove()
+
+            # Treeview for folder structure for Process 1, placed below Process 1's Browse button
+            self.treeview1 = ttk.Treeview(self.window)
+            self.treeview1.grid(row=2, column=1, columnspan=3, padx=10, pady=10, sticky="nsew")
+
+            self.populate_treeview(self.treeview1, self.filepath1_current)
+            self.expand_one_level(self.treeview1)  # Expand only one level by default
+
+    def browse_file1_previous(self):
+        self.filepath1_previous = filedialog.askdirectory()
+
+    def browse_file2_current(self):
+        self.filepath2_current = filedialog.askdirectory()
+        if self.filepath2_current:
+            if self.treeview2:
+                self.treeview2.grid_remove()
+
+            # Treeview for folder structure for Process 2
+            self.treeview2 = ttk.Treeview(self.window)
+            self.treeview2.grid(row=5, column=1, columnspan=3, padx=10, pady=10, sticky="nsew")
+
+            self.populate_treeview(self.treeview2, self.filepath2_current)
+            self.expand_one_level(self.treeview2)  # Expand only one level by default
+
+    def browse_file2_previous(self):
+        self.filepath2_previous = filedialog.askdirectory()
+
+    def populate_treeview(self, treeview, parent_dir):
+        """Populate the treeview with directories and files"""
+        treeview.heading("#0", text="Folder Structure", anchor='w')
+
+        # Recursive function to add directories and files to the treeview
+        def insert_node(parent, full_path):
+            basename = os.path.basename(full_path)
+            node = treeview.insert(parent, 'end', text=basename, open=False)
+            if os.path.isdir(full_path):
+                for item in os.listdir(full_path):
+                    insert_node(node, os.path.join(full_path, item))
+
+        insert_node("", parent_dir)
+
+    def expand_one_level(self, treeview):
+        """Expand only one level of folders by default (keep files collapsed)."""
+        def expand_first_level(node):
+            for child in treeview.get_children(node):
+                treeview.item(child, open=True)  # Expand only the first level (top-level folders)
+        expand_first_level("")  # Start from the root node
+
+    def validate_input_data1(self):
+        """Validate input data for Process 1"""
+        if not self.filepath1_current or not self.filepath1_previous:
+            messagebox.showerror("Error", "Please select both Current and Previous period directories for Process 1.")
+            return
+
+        output_folder = filedialog.askdirectory(title="Select Output Folder")
+        if not output_folder:
+            messagebox.showerror("Error", "Please select an output folder.")
+            return
+
+        output_file = os.path.join(output_folder, 'Input_data_periodic_comparison_process1.xlsx')
+
+        try:
+            # Call the compare_months function
+            compare_months(self.filepath1_current, self.filepath1_previous, output_file)
+            messagebox.showinfo("Success", "Process 1 validation completed successfully.")
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred during Process 1 validation: {e}")
+
+    def validate_input_data2(self):
+        """Validate input data for Process 2"""
+        if not self.filepath2_current or not self.filepath2_previous:
+            messagebox.showerror("Error", "Please select both Current and Previous period directories for Process 2.")
+            return
+
+        output_folder = filedialog.askdirectory(title="Select Output Folder")
+        if not output_folder:
+            messagebox.showerror("Error", "Please select an output folder.")
+            return
+
+        output_file = os.path.join(output_folder, 'Input_data_periodic_comparison_process2.xlsx')
+
+        try:
+            # Call the compare_months function
+            compare_months(self.filepath2_current, self.filepath2_previous, output_file)
+            messagebox.showinfo("Success", "Process 2 validation completed successfully.")
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred during Process 2 validation: {e}")
+
+    def run_process1(self):
+        """Run the selected Python file for Process 1"""
+        python_file = filedialog.askopenfilename(title="Select Python File", filetypes=[("Python files", "*.py")])
+        if not python_file:
+            messagebox.showerror("Error", "Please select a Python file.")
+            return
+
+        output_folder = filedialog.askdirectory(title="Select Output Folder")
+        if not output_folder:
+            messagebox.showerror("Error", "Please select an output folder.")
+            return
+
+        try:
+            # Run the selected Python file with the current browse path and output folder
+            subprocess.run(['python', python_file, self.filepath1_current, output_folder])
+            messagebox.showinfo("Success", f"Process 1 completed successfully. Output saved in {output_folder}.")
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred during Process 1 execution: {e}")
+
+    def run_process2(self):
+        """Run the selected Python file for Process 2"""
+        python_file = filedialog.askopenfilename(title="Select Python File", filetypes=[("Python files", "*.py")])
+        if not python_file:
+            messagebox.showerror("Error", "Please select a Python file.")
+            return
+
+        output_folder = filedialog.askdirectory(title="Select Output Folder")
+        if not output_folder:
+            messagebox.showerror("Error", "Please select an output folder.")
+            return
+
+        try:
+            # Run the selected Python file with the current browse path and output folder
+            subprocess.run(['python', python_file, self.filepath2_current, output_folder])
+            messagebox.showinfo("Success", f"Process 2 completed successfully. Output saved in {output_folder}.")
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred during Process 2 execution: {e}")
+
+    def clear_all(self):
+        self.checkbox1_var.set(False)
+        self.checkbox2_var.set(False)
+        self.filepath1_current = ""
+        self.filepath1_previous = ""
+        self.filepath2_current = ""
+        self.filepath2_previous = ""
+
+        if hasattr(self, 'browse_button1_current'):
+            self.browse_button1_current.grid_remove()
+        if hasattr(self, 'browse_button2_current'):
+            self.browse_button2_current.grid_remove()
+
+        if self.treeview1:
+            self.treeview1.grid_remove()
+        if self.treeview2:
+            self.treeview2.grid_remove()
+
+
+if __name__ == "__main__":
+    root = ctk.CTk()
+    app = App(root)
+    root.mainloop()
