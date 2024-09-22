@@ -63,6 +63,8 @@ class DataFrameProcessor:
             'Target_dataframe': list,            
             'output_columns': list,
             'source_dataframe': list,
+            'groupby_columns': list,  # Adding groupby columns
+            'aggregations': list,     # Adding aggregation information
             'input_columns': list,
             'derivation_logic': list,
             'Merge_Dataframe': list,
@@ -82,6 +84,8 @@ class DataFrameProcessor:
                 'Target_dataframe': row['Target_dataframe'],
                 'output_columns': row['output_columns'],
                 'source_dataframe': row['source_dataframe'],
+                'groupby_columns': row['groupby_columns'],
+                'aggregations': row['aggregations'],
                 'input_columns': row['input_columns'],
                 'derivation_logic': row['derivation_logic'],
                 'Merge_Dataframe': row['Merge_Dataframe'],
@@ -167,6 +171,7 @@ class DataFrameProcessor:
 import pandas as pd
 import logging
 import operator
+import re
 
 class SourceLayer:
     def __init__(self, source_info):
@@ -385,9 +390,61 @@ class RepairLayer:
 
         return df                                           
 
+                                             
+    def apply_groupby_logic(self, df, output):
+        print("Step 1: Found 'groupby_columns' and 'aggregations' in output.")
+
+        # Handle groupby columns (allow comma-separated strings or lists)
+        if isinstance(output["groupby_columns"][0], str):
+            groupby_columns = [col.strip() for col in output["groupby_columns"][0].split(',')]
+        else:
+            groupby_columns = output["groupby_columns"]
+        
+        print(f"Step 2: Grouping by columns: {groupby_columns}")
+
+        # Parse the aggregations using the updated helper function
+        print("Step 3: Parsing aggregations...")
+        print(f"Aggregations string: {output['aggregations'][0]}")
+        # aggregations = self.parse_aggregations(output["aggregations"])
+
+        aggregations = {}
+        print("Parsing aggregations...")
+        
+        # Split the aggregations by comma to handle multiple aggregations
+        aggregations_str = output["aggregations"][0]
+        for item in aggregations_str.split('},'):
+            item = item.strip() + '}' if not item.endswith('}') else item.strip()
+            try:
+                key, value = item.split(': {')
+                key = key.strip()
+                col_name, agg_func = value.replace('}', '').split(', ')
+                col_name = col_name.split(': ')[1].strip()
+                agg_func = agg_func.split(': ')[1].strip()
+                aggregations[key] = {"column": col_name, "agg_func": agg_func}
+            except Exception as e:
+                print(f"ERROR: Failed to parse aggregation '{item}' - {e}")
+                logging.error(f"Failed to parse aggregation '{item}' - {e}")
+
+        # Build the aggregation dictionary for groupby
+        agg_dict = {agg_info["column"]: agg_info["agg_func"] for agg_info in aggregations.values()}
+        
+        print(f"Step 4: Aggregation dictionary for groupby: {agg_dict}")
+        
+        # Apply groupby and aggregations
+        grouped_df = df.groupby(groupby_columns).agg(agg_dict).reset_index()
+        
+        print(f"Step 5: Groupby applied. Resulting DataFrame shape: {grouped_df.shape}")
+        
+        # Step 7: Return the grouped DataFrame
+        return grouped_df
+
+
     def apply_logic(self, df, output):
+
         for method, formula_logic, dependencies, output_col in zip(
                 output['derivation_logic'], output['formula_logic'], output['dependencies'], output['output_columns']):
+            
+            # Existing logic for drop_rows, drop_columns, append etc.
 
             if method == 'drop_rows':
                 # Evaluate the condition specified in formula_logic and drop rows accordingly
@@ -436,6 +493,12 @@ class RepairLayer:
                 else:
                     print(f"ERROR: No DataFrames found to concatenate.")
                     logging.error(f"No DataFrames found to concatenate.")
+
+            elif method == 'groupby':
+                df = self.apply_groupby_logic(df, output)
+                print(f"SUCCESS: Applied groupby logic.")
+                logging.info(f"Applied groupby logic.")
+                                             
         return df
 
 
