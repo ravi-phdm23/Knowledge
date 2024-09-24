@@ -559,13 +559,18 @@ class RepairLayer:
             # Apply formula-based and other logic
             df = self.apply_formula_logic(df, output)
 
-            # Apply the new logic for drop_rows, drop_columns, append
+            # Apply other logics such as drop_rows, append, groupby
             df = self.apply_logic(df, output)
-                                             
+            
+            # Ensure only required columns are kept in the DataFrame
+            required_columns = output['output_columns']
+            df = df[required_columns]  # Select only the columns specified in output_columns
+
+            # Store the processed DataFrame
             self.dataframes[target_df_name] = df
 
-
         return self.dataframes
+
         """))
 
         # Add the markdown cell to describe the report layer
@@ -578,33 +583,31 @@ class ReportLayer:
         self.processed_data = processed_data
 
     def save_output(self, output_info):
-        # A dictionary to hold open Excel writer objects for each file
-        excel_writers = {}
-        
+        \"""
+        Saves the processed data to the specified Excel files and worksheets.
+        If the file exists, it updates only the specified sheet; if not, it creates the file.
+        \"""
+        # Loop through each output info entry
         for output in output_info:
             output_file_path = output['output_file_path']
-            output_worksheet = output.get('output_worksheet', 'Sheet1')  # Use 'Sheet1' as default worksheet name if not provided
-            
-            # Open an existing writer if it's already created for the same output file path, or create a new one
-            if output_file_path not in excel_writers:
-                excel_writers[output_file_path] = pd.ExcelWriter(
-                    output_file_path, 
-                    engine='openpyxl', 
-                    mode='a' if os.path.exists(output_file_path) else 'w',
-                    if_sheet_exists='replace'  # Options: 'replace', 'new', or 'overlay'
-                )
+            output_worksheet = output.get('output_worksheet', 'Sheet1')  # Default to 'Sheet1' if not provided
 
-            writer = excel_writers[output_file_path]
+            # Get the DataFrame to be written
             df = self.processed_data[output['Target_dataframe'][0]]
             
-            # Write the dataframe to the specified worksheet, replacing it if it already exists
-            df.to_excel(writer, sheet_name=output_worksheet, index=False)
-            print(f"SUCCESS: Saved output to {output_file_path} in worksheet '{output_worksheet}'")
-            logging.info(f"Saved output to {output_file_path} in worksheet '{output_worksheet}'")
-
-        # Save and close all open writers
-        for writer in excel_writers.values():
-            writer.close()  # No need to call save; close() is sufficient
+            if os.path.exists(output_file_path):
+                # If the file exists, open it with openpyxl, load the workbook, and remove the existing sheet
+                with pd.ExcelWriter(output_file_path, mode='a', engine='openpyxl', if_sheet_exists='replace') as writer:
+                    # Write the DataFrame to the specified sheet, replacing it if it exists
+                    df.to_excel(writer, sheet_name=output_worksheet, index=False)
+                    print(f"SUCCESS: Updated sheet '{output_worksheet}' in file '{output_file_path}'")
+                    logging.info(f"Updated sheet '{output_worksheet}' in file '{output_file_path}'")
+            else:
+                # If the file does not exist, create a new file and write the DataFrame
+                with pd.ExcelWriter(output_file_path, engine='openpyxl') as writer:
+                    df.to_excel(writer, sheet_name=output_worksheet, index=False)
+                    print(f"SUCCESS: Created file '{output_file_path}' with sheet '{output_worksheet}'")
+                    logging.info(f"Created file '{output_file_path}' with sheet '{output_worksheet}'")
         """))
 
         # Add a final code cell for the example usage
