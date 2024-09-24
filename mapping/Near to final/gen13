@@ -510,7 +510,6 @@ class RepairLayer:
                                              
         return df
 
-
     def process_data(self):
         for output in self.output_info:
             # Handle comma-separated source_dataframe names
@@ -528,18 +527,14 @@ class RepairLayer:
                     if source_df_name in self.dataframes:
                         # Try to load from source dataframes
                         dataframes_to_concat.append(self.dataframes[source_df_name].copy())
-                    elif source_df_name in self.dataframes:
-                        # If not in source, try to load from target dataframes
-                        dataframes_to_concat.append(self.dataframes[source_df_name].copy())
                     else:
-                        print(f"ERROR: Source/Target dataframe {source_df_name} not found.")
-                        logging.error(f"Source/Target dataframe {source_df_name} not found.")
+                        print(f"ERROR: Source dataframe {source_df_name} not found.")
+                        logging.error(f"Source dataframe {source_df_name} not found.")
 
                 if len(dataframes_to_concat) > 0:
                     df = pd.concat(dataframes_to_concat, ignore_index=True)
                 else:
                     continue  # Skip if no valid DataFrames found
-
             else:
                 # Single DataFrame case
                 source_df_name = source_dataframes[0]  # Only one DataFrame in the list
@@ -550,18 +545,20 @@ class RepairLayer:
                     logging.error(f"Source dataframe {source_df_name} not found.")
                     continue
 
-            # Apply direct logic
+            # Apply direct logic (always occurs first)
             df, direct_input_columns = self.apply_direct_logic(df, output)
 
-            # Apply merge logic
-            df = self.apply_merge_logic(df, output, direct_input_columns)
+            # List of other methods to handle dynamically
+            for method in output['derivation_logic']:
+                if method == 'merge':
+                    df = self.apply_merge_logic(df, output, direct_input_columns)
+                elif method == 'formula_based':
+                    df = self.apply_formula_logic(df, output)
+                elif method == 'groupby':
+                    df = self.apply_groupby_logic(df, output)
+                elif method == 'drop_rows' or method == 'drop_columns' or method == 'append':
+                    df = self.apply_logic(df, output)
 
-            # Apply formula-based and other logic
-            df = self.apply_formula_logic(df, output)
-
-            # Apply other logics such as drop_rows, append, groupby
-            df = self.apply_logic(df, output)
-            
             # Ensure only required columns are kept in the DataFrame
             required_columns = output['output_columns']
             df = df[required_columns]  # Select only the columns specified in output_columns
@@ -570,6 +567,7 @@ class RepairLayer:
             self.dataframes[target_df_name] = df
 
         return self.dataframes
+
 
         """))
 
