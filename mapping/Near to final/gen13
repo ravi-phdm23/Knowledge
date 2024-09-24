@@ -231,32 +231,38 @@ class RepairLayer:
                                                                      
         return df, direct_input_columns
 
-    def apply_merge_logic(self, df, output, direct_input_columns):
+    def apply_merge_logic(self, df, output, direct_col):
         for output_col, method, merge_df, left_on, right_on, how, merge_input_col, blank_default in zip(
             output['output_columns'], output['derivation_logic'], output['Merge_Dataframe'],
             output['left_on'], output['right_on'], output['how'], output['merge_mapping_columns'], output['blank_default']):
+
             if method == 'merge' and merge_df != 'blank':
                 merge_df = self.dataframes[merge_df].copy()
-                                             
+
                 # Ensure left_on and right_on are lists
                 left_on = self.parse_list_string(','.join(left_on))
                 right_on = self.parse_list_string(','.join(right_on))
-                                             
                 right_on.append(merge_input_col)
-                                             
-                df = pd.merge(df, merge_df[right_on], left_on=left_on, right_on=right_on[:-1], how=how)
+
+                # Perform the merge with custom suffixes to handle any potential column name collisions
+                df = pd.merge(df, merge_df[right_on], left_on=left_on, right_on=right_on[:-1], how=how, suffixes=('_left', '_right'))
+
+                # Rename the merged column to the desired output column name
                 df.rename(columns={merge_input_col: output_col}, inplace=True)
                 df[output_col] = df[output_col].fillna(blank_default)
+
                 print(f"SUCCESS: Populated and renamed {merge_input_col} to {output_col} using merge logic.")
                 logging.info(f"Populated and renamed {merge_input_col} to {output_col} using merge logic.")
-                                             
-                #Now drop the input columns that are not part of the final output
-                for col in direct_input_columns:
-                    if col in df.columns and col not in output['output_columns']:
+
+                # Drop the columns used for right_on after performing the merge
+                for col in right_on:
+                    if col in df.columns and col != merge_input_col and col not in direct_col:
                         df.drop(columns=[col], inplace=True)
                         print(f"SUCCESS: Dropped column {col} after merge.")
                         logging.info(f"Dropped column {col} after merge.")
+        
         return df
+
 
                                           
     def create_output_info_df(self,output_info):
