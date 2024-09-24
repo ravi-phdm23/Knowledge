@@ -289,7 +289,6 @@ class RepairLayer:
         return output_info_df
 
     def parse_formula(self, formula_logic, df, dependencies, output_type):
-
         # Mapping for operators
         ops = {
             '+': operator.add,
@@ -339,36 +338,42 @@ class RepairLayer:
 
             return result
 
-        # Simple formulas (e.g., 'output_a3 + output_a5')
-        tokens = formula_logic.split()
-        if len(tokens) == 3:
-            left_col = tokens[0]
-            operator_symbol = tokens[1]
-            right_col = tokens[2]
+        # Handle 'astype' operations
+        if 'astype' in formula_logic:
+            # Extract column and type
+            column_name = formula_logic.split('.')[0]
+            cast_type = formula_logic.split("astype('")[1].split("')")[0]
 
-            # Ensure the columns exist
-            if left_col not in df.columns or right_col not in df.columns:
-                raise KeyError(f"One of the columns {left_col} or {right_col} is not present in the DataFrame.")
+            # Cast the column to the specified type
+            df[column_name] = df[column_name].astype(cast_type)
+            return df[column_name]
 
-            # Convert columns to numeric
-            df[left_col] = pd.to_numeric(df[left_col], errors='coerce')
-            df[right_col] = pd.to_numeric(df[right_col], errors='coerce')
+        # Handle 'str' operations (like slicing)
+        if '.str' in formula_logic and '[:' in formula_logic:
+            column_name = formula_logic.split('.')[0]
+            start = int(formula_logic.split('[:')[1].split(']')[0])
 
-            if operator_symbol in ops:
-                result = ops[operator_symbol](df[left_col], df[right_col])
+            # Handle string slicing
+            df[column_name] = df[column_name].astype(str).str[:start]
+            return df[column_name]
 
-                # Convert to the required output type
-                if output_type == 'float':
-                    result = result.astype(float)
-                elif output_type == 'int':
-                    result = result.astype(int)
-                else:
-                    result = result.astype(object)
+        # Handle more complex pandas expressions using eval
+        try:
+            # Use pandas.eval to handle simpler arithmetic expressions
+            result = df.eval(formula_logic)
+            
+            # Convert to the required output type (if specified)
+            if output_type == 'float':
+                result = result.astype(float)
+            elif output_type == 'int':
+                result = result.astype(int)
+            else:
+                result = result.astype(object)
 
-                return result
-
-        # Raise error for unsupported formulas
-        raise ValueError(f"Unsupported formula logic: {formula_logic}")
+            return result
+        except Exception as e:
+            # If eval fails, raise an error
+            raise ValueError(f"Unsupported formula logic: {formula_logic}. Error: {str(e)}")
 
 
     def apply_formula_logic(self, df, output):
