@@ -506,6 +506,7 @@ class RepairLayer:
                 aggregations = output['aggregations']
                 print(f"Applying groupby logic on columns: {groupby_columns} with aggregations: {aggregations}")
                 df = self.apply_groupby_logic(df, output)
+                return df
 
             # Handle merge logic
             elif method == 'merge':
@@ -515,12 +516,13 @@ class RepairLayer:
                 merge_df = output['Merge_Dataframe']
                 print(f"Applying merge logic between source and {merge_df} on {left_on} and {right_on} with {how} join")
                 df = self.apply_merge_logic(df, output, left_on, right_on, how)
-
+                return df
 
             # Handle formula-based logic
             elif method == 'formula_based':
                 print(f"Applying formula-based logic on {output_col} using formula: {formula_logic}")
                 df = self.apply_formula_logic(df, output)
+                return df
 
             # Handle drop rows
             elif method == 'drop_rows':
@@ -529,13 +531,15 @@ class RepairLayer:
                 indices_to_drop = df.query(condition_str).index
                 df = df.drop(indices_to_drop)
                 logging.info(f"Dropped rows based on logic: {formula_logic}")
+                return df
 
             # Handle drop columns
-            elif method == 'drop_columns':
+            elif method == 'drop_column':
                 columns_to_drop = self.parse_list_string(dependencies)
                 df.drop(columns=columns_to_drop, inplace=True)
                 print(f"SUCCESS: Dropped columns: {dependencies}")
                 logging.info(f"Dropped columns: {dependencies}")
+                return df
 
             # Handle append logic
             elif method == 'append':
@@ -550,6 +554,7 @@ class RepairLayer:
                 else:
                     print(f"ERROR: No DataFrames found to concatenate.")
                     logging.error(f"No DataFrames found to concatenate.")
+                return df
 
         return df
                                             
@@ -591,7 +596,7 @@ class RepairLayer:
                     df = self.apply_merge_logic(df, output, direct_input_columns)
                 elif method == 'formula_based' or method == 'static':
                     df = self.apply_formula_logic(df, output)
-                elif method in ['drop_rows', 'drop_columns', 'append', 'groupby']:
+                elif method in ['drop_rows', 'drop_column', 'append', 'groupby']:
                     df = self.apply_logic(df, output)
 
             # Ensure only required columns are kept in the DataFrame if logic is not append
@@ -604,9 +609,6 @@ class RepairLayer:
             self.dataframes[target_df_name] = df
 
         return self.dataframes
-
-
-
         """))
 
         # Add the markdown cell to describe the report layer
