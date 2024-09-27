@@ -359,31 +359,30 @@ class RepairLayer:
             df[column_name] = df[column_name].astype(cast_type)
             return df[column_name]
 
-        # Handle 'str' operations with slicing (e.g., output_a1.str[1:2])
+        # Handle 'str' operations with slicing (e.g., output_a1.str[1:2] or output_a1.str[:2])
         if '.str' in formula_logic and '[' in formula_logic and ']' in formula_logic:
-            column_name = formula_logic.split('.')[0]
-            slice_str = formula_logic.split('[')[1].split(']')[0]
-            start, end = map(int, slice_str.split(':'))  # Extract the start and end indices for slicing
-            df[column_name] = df[column_name].astype(str).str[start:end]
-            return df[column_name]
+            try:
+                column_name = formula_logic.split('.')[0]
+                slice_str = formula_logic.split('[')[1].split(']')[0]
 
-        # Handle more complex pandas expressions using eval
-        try:
-            # Use pandas.eval to handle simpler arithmetic expressions
-            result = df.eval(formula_logic)
-            
-            # Convert to the required output type (if specified)
-            if output_type == 'float':
-                result = result.astype(float)
-            elif output_type == 'int':
-                result = result.astype(int)
-            else:
-                result = result.astype(object)
+                # Handle cases like [:2] or [1:] where start or end may be missing
+                slice_parts = slice_str.split(':')
 
-            return result
-        except Exception as e:
-            # If eval fails, raise an error
-            raise ValueError(f"Unsupported formula logic: {formula_logic}. Error: {str(e)}")
+                # Set start and end, accounting for missing values
+                if len(slice_parts) == 2:
+                    start = int(slice_parts[0]) if slice_parts[0] else None  # Use None if start is empty
+                    end = int(slice_parts[1]) if slice_parts[1] else None  # Use None if end is empty
+                elif len(slice_parts) == 1:
+                    start = int(slice_parts[0]) if slice_parts[0] else None
+                    end = None
+                else:
+                    raise ValueError(f"Invalid slice format: {slice_str}")
+
+                # Apply slicing to the column, using .str[start:end]
+                df[column_name] = df[column_name].astype(str).str[start:end]
+                return df[column_name]
+            except Exception as e:
+                raise ValueError(f"Unsupported formula logic: {formula_logic}. Error: {str(e)}")
 
 
     def apply_formula_logic(self, df, output):
