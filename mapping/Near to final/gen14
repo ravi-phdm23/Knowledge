@@ -359,13 +359,12 @@ class RepairLayer:
             df[column_name] = df[column_name].astype(cast_type)
             return df[column_name]
 
-        # Handle 'str' operations (like slicing)
-        if '.str' in formula_logic and '[:' in formula_logic:
+        # Handle 'str' operations with slicing (e.g., output_a1.str[1:2])
+        if '.str' in formula_logic and '[' in formula_logic and ']' in formula_logic:
             column_name = formula_logic.split('.')[0]
-            start = int(formula_logic.split('[:')[1].split(']')[0])
-
-            # Handle string slicing
-            df[column_name] = df[column_name].astype(str).str[:start]
+            slice_str = formula_logic.split('[')[1].split(']')[0]
+            start, end = map(int, slice_str.split(':'))  # Extract the start and end indices for slicing
+            df[column_name] = df[column_name].astype(str).str[start:end]
             return df[column_name]
 
         # Handle more complex pandas expressions using eval
