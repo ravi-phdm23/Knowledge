@@ -355,15 +355,24 @@ class RepairLayer:
             column_name = formula_logic.split('.')[0]
             cast_type = formula_logic.split("astype('")[1].split("')")[0]
 
-            # Cast the column to the specified type
-            df[column_name] = df[column_name].astype(cast_type)
-            return df[column_name]
+            # Create a temporary column to ensure the input column is not modified
+            temp_column_name = f"temp_{column_name}"
+            df[temp_column_name] = df[column_name].copy()
+
+            # Cast the temporary column to the specified type
+            df[temp_column_name] = df[temp_column_name].astype(cast_type)
+            
+            return df[temp_column_name]
 
         # Handle 'str' operations with slicing (e.g., output_a1.str[1:2] or output_a1.str[:2])
         if '.str' in formula_logic and '[' in formula_logic and ']' in formula_logic:
             try:
                 column_name = formula_logic.split('.')[0]
                 slice_str = formula_logic.split('[')[1].split(']')[0]
+
+                # Create a temporary column to ensure the input column is not modified
+                temp_column_name = f"temp_{column_name}"
+                df[temp_column_name] = df[column_name].copy()
 
                 # Handle cases like [:2] or [1:] where start or end may be missing
                 slice_parts = slice_str.split(':')
@@ -378,11 +387,12 @@ class RepairLayer:
                 else:
                     raise ValueError(f"Invalid slice format: {slice_str}")
 
-                # Apply slicing to the column, using .str[start:end]
-                df[column_name] = df[column_name].astype(str).str[start:end]
-                return df[column_name]
+                # Apply slicing to the temporary column, using .str[start:end]
+                df[temp_column_name] = df[temp_column_name].astype(str).str[start:end]
+                return df[temp_column_name]
             except Exception as e:
                 raise ValueError(f"Unsupported formula logic: {formula_logic}. Error: {str(e)}")
+
 
 
     def apply_formula_logic(self, df, output):
