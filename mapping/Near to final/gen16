@@ -222,17 +222,15 @@ class RepairLayer:
             return [col.strip() for col in list_str.split(',')]
         return [list_str]  # If it's a single column, wrap it in a list
                                              
-    def apply_direct_logic(self, df, output):
-        direct_input_columns = []                                     
-        for input_col, output_col, method, blank_default in zip(output['input_columns'], output['output_columns'], output['derivation_logic'], output['blank_default']):
-            if method == 'direct':
-                df[output_col] = df[input_col].fillna(blank_default)
-                print(f"SUCCESS: Populated {output_col} using direct logic from {input_col}.")
-                logging.info(f"Populated {output_col} using direct logic from {input_col}.")
-                direct_input_columns.append(input_col)
-                                           
-                                                                     
-        return df, direct_input_columns
+    def apply_direct_logic(self, df, input_col, output_col, blank_default):
+        \"""
+        Applies the direct logic to populate the output_col from input_col.
+        \"""
+        df[output_col] = df[input_col].fillna(blank_default)
+        print(f"SUCCESS: Populated {output_col} using direct logic from {input_col}.")
+        logging.info(f"Populated {output_col} using direct logic from {input_col}.")
+        return df
+
 
     def apply_merge_logic(self, df, output, direct_col):
         for output_col, method, merge_df, left_on, right_on, how, merge_input_col, blank_default in zip(
@@ -299,6 +297,87 @@ class RepairLayer:
         
         return output_info_df
 
+
+    def handle_if_else_logic(self, df, formula_logic, output_type):
+        # Parse the if-then-else logic
+        tokens = formula_logic.split()
+        if_idx = tokens.index(next(token for token in tokens if token.lower() == 'if'))
+        then_idx = tokens.index(next(token for token in tokens if token.lower() == 'then'))
+        else_idx = tokens.index(next(token for token in tokens if token.lower() == 'else'))
+
+        condition = tokens[if_idx + 1:then_idx]
+        then_value = tokens[then_idx + 1:else_idx]
+        else_value = tokens[else_idx + 1:]
+
+        # Ensure that columns are referenced properly as df['column_name']
+        condition_str = ' '.join([f"df['{token}']" if token in df.columns else token for token in condition])
+
+        print(f"Evaluating condition: {condition_str}")  # Debug print
+
+        # Evaluate the condition using eval
+        df['condition'] = eval(condition_str)
+
+        # Apply the then/else logic based on the condition
+        result = df['condition'].apply(
+            lambda x: eval(' '.join([f"df['{val}']" if val in df.columns else val for val in then_value])) if x else eval(' '.join([f"df['{val}']" if val in df.columns else val for val in else_value]))
+        )
+
+        # Convert to the required output type
+        if output_type == 'float':
+            result = result.astype(float)
+        elif output_type == 'int':
+            result = result.astype(int)
+        else:
+            result = result.astype(object)
+
+        # Drop temporary 'condition' column
+        df.drop(columns=['condition'], inplace=True)
+
+        return result
+
+    def handle_astype_logic(self, df, formula_logic):
+        # Extract column and type
+        column_name = formula_logic.split('.')[0]
+        cast_type = formula_logic.split("astype('")[1].split("')")[0]
+
+        # Create a temporary column to ensure the input column is not modified
+        temp_column_name = f"temp_{column_name}"
+        df[temp_column_name] = df[column_name].copy()
+
+        # Cast the temporary column to the specified type
+        df[temp_column_name] = df[temp_column_name].astype(cast_type)
+        
+        return df[temp_column_name]
+
+    def handle_str_slicing(self, df, formula_logic):
+        try:
+            column_name = formula_logic.split('.')[0]
+            slice_str = formula_logic.split('[')[1].split(']')[0]
+
+            # Create a temporary column to ensure the input column is not modified
+            temp_column_name = f"temp_{column_name}"
+            df[temp_column_name] = df[column_name].copy()
+
+            # Handle cases like [:2] or [1:] where start or end may be missing
+            slice_parts = slice_str.split(':')
+
+            # Set start and end, accounting for missing values
+            if len(slice_parts) == 2:
+                start = int(slice_parts[0]) if slice_parts[0] else None  # Use None if start is empty
+                end = int(slice_parts[1]) if slice_parts[1] else None  # Use None if end is empty
+            elif len(slice_parts) == 1:
+                start = int(slice_parts[0]) if slice_parts[0] else None
+                end = None
+            else:
+                raise ValueError(f"Invalid slice format: {slice_str}")
+
+            # Apply slicing to the temporary column, using .str[start:end]
+            df[temp_column_name] = df[temp_column_name].astype(str).str[start:end]
+            return df[temp_column_name]
+        except Exception as e:
+            raise ValueError(f"Unsupported formula logic: {formula_logic}. Error: {str(e)}")
+
+
     def parse_formula(self, formula_logic, df, dependencies, output_type):
         # Mapping for operators
         ops = {
@@ -308,130 +387,53 @@ class RepairLayer:
             '/': operator.truediv,
         }
 
-        # Convert the formula logic to lowercase for case-insensitivity
-        formula_logic_lower = formula_logic.lower()
+        # Normalize output_type: Treat 'int' and 'int64' the same, and 'float' and 'float64' the same
+        if output_type in ['int', 'int64']:
+            output_type = 'int64'
+        elif output_type in ['float', 'float64']:
+            output_type = 'float64'
 
+        # Use regex to split the formula by operators while keeping the operators in the result
+        tokens = re.split(r'(\\+|\\-|\\*|/)', formula_logic)
 
-        # Check if the formula contains an operator
-        for op_symbol, op_func in ops.items():
-            if op_symbol in formula_logic_lower:
-                # Split the formula by the operator to get the operands
-                operands = formula_logic.split(op_symbol)
-                operand1 = operands[0].strip()
-                operand2 = operands[1].strip()
+        # Initialize the result to None
+        result = None
+        current_operator = None
 
-                # Check if operand1 is a column in the dataframe or a literal value
-                if operand1 in df.columns:
-                    operand1_value = df[operand1]
-                else:
-                    try:
-                        operand1_value = float(operand1)  # Convert literal to float or appropriate type
-                    except ValueError:
-                        raise ValueError(f"Invalid value for operand1: {operand1}")
+        for token in tokens:
+            token = token.strip()
 
-                # Check if operand2 is a column in the dataframe or a literal value
-                if operand2 in df.columns:
-                    operand2_value = df[operand2]
-                else:
-                    try:
-                        operand2_value = float(operand2)  # Convert literal to float or appropriate type
-                    except ValueError:
-                        raise ValueError(f"Invalid value for operand2: {operand2}")
-
-                # Apply the operator function
-                result = op_func(operand1_value, operand2_value)
-
-                # Return the result, cast to the correct type if necessary
-                if output_type == 'float':
-                    return result.astype(float)
-                elif output_type == 'int':
-                    return result.astype(int)
-                else:
-                    return result.astype(object)                                             
-
-
-        # Example: 'IF condition THEN value1 ELSE value2' logic
-        if 'if' in formula_logic_lower:
-            # Parse the if-then-else logic
-            tokens = formula_logic.split()
-            if_idx = tokens.index(next(token for token in tokens if token.lower() == 'if'))
-            then_idx = tokens.index(next(token for token in tokens if token.lower() == 'then'))
-            else_idx = tokens.index(next(token for token in tokens if token.lower() == 'else'))
-
-            condition = tokens[if_idx + 1:then_idx]
-            then_value = tokens[then_idx + 1:else_idx]
-            else_value = tokens[else_idx + 1:]
-
-            # Ensure that columns are referenced properly as df['column_name']
-            condition_str = ' '.join([f"df['{token}']" if token in df.columns else token for token in condition])
-
-            print(f"Evaluating condition: {condition_str}")  # Debug print
-
-            # Evaluate the condition using eval
-            df['condition'] = eval(condition_str)
-
-            # Apply the then/else logic based on the condition
-            result = df['condition'].apply(
-                lambda x: eval(' '.join([f"df['{val}']" if val in df.columns else val for val in then_value])) if x else eval(' '.join([f"df['{val}']" if val in df.columns else val for val in else_value]))
-            )
-
-            # Convert to the required output type
-            if output_type == 'float':
-                result = result.astype(float)
-            elif output_type == 'int':
-                result = result.astype(int)
+            # If the token is an operator, set the current operator
+            if token in ops:
+                current_operator = ops[token]
             else:
-                result = result.astype(object)
-
-            # Drop temporary 'condition' column
-            df.drop(columns=['condition'], inplace=True)
-
-            return result
-
-        # Handle 'astype' operations
-        if 'astype' in formula_logic:
-            # Extract column and type
-            column_name = formula_logic.split('.')[0]
-            cast_type = formula_logic.split("astype('")[1].split("')")[0]
-
-            # Create a temporary column to ensure the input column is not modified
-            temp_column_name = f"temp_{column_name}"
-            df[temp_column_name] = df[column_name].copy()
-
-            # Cast the temporary column to the specified type
-            df[temp_column_name] = df[temp_column_name].astype(cast_type)
-            
-            return df[temp_column_name]
-
-        # Handle 'str' operations with slicing (e.g., output_a1.str[1:2] or output_a1.str[:2])
-        if '.str' in formula_logic and '[' in formula_logic and ']' in formula_logic:
-            try:
-                column_name = formula_logic.split('.')[0]
-                slice_str = formula_logic.split('[')[1].split(']')[0]
-
-                # Create a temporary column to ensure the input column is not modified
-                temp_column_name = f"temp_{column_name}"
-                df[temp_column_name] = df[column_name].copy()
-
-                # Handle cases like [:2] or [1:] where start or end may be missing
-                slice_parts = slice_str.split(':')
-
-                # Set start and end, accounting for missing values
-                if len(slice_parts) == 2:
-                    start = int(slice_parts[0]) if slice_parts[0] else None  # Use None if start is empty
-                    end = int(slice_parts[1]) if slice_parts[1] else None  # Use None if end is empty
-                elif len(slice_parts) == 1:
-                    start = int(slice_parts[0]) if slice_parts[0] else None
-                    end = None
+                # Handle string slicing for operands
+                if '.str' in token:
+                    operand_value = self.handle_str_slicing(df, token)
                 else:
-                    raise ValueError(f"Invalid slice format: {slice_str}")
+                    # Check if it's a column or literal
+                    if token in df.columns:
+                        operand_value = df[token]
+                    else:
+                        try:
+                            operand_value = float(token)
+                        except ValueError:
+                            raise ValueError(f"Invalid value: {token}")
 
-                # Apply slicing to the temporary column, using .str[start:end]
-                df[temp_column_name] = df[temp_column_name].astype(str).str[start:end]
-                return df[temp_column_name]
-            except Exception as e:
-                raise ValueError(f"Unsupported formula logic: {formula_logic}. Error: {str(e)}")
+                # If result is None, this is the first operand
+                if result is None:
+                    result = operand_value
+                else:
+                    # Apply the current operator between the result and the operand
+                    result = current_operator(result, operand_value)
 
+        # Return the result, cast to the correct type
+        if output_type == 'float64':
+            return result.astype('float64')
+        elif output_type == 'int64':
+            return result.astype('int64')
+        else:
+            return result.astype(object)
 
 
     def apply_formula_logic(self, df, output_col, method, formula_logic, dependencies, blank_default, data_type=None, static_value=None):
@@ -544,10 +546,11 @@ class RepairLayer:
         logging.info("Applying logic in specified order...")
 
         # Iterate over the list of derivation logic to apply each logic step in order
-        for method, output_col, formula_logic, dependencies, blank_default, data_type, static_value in zip(
+        for method, output_col, formula_logic, dependencies, blank_default, data_type, static_value, input_col in zip(
             output['derivation_logic'], output['output_columns'], 
             output['formula_logic'], output['dependencies'], 
-            output['blank_default'], output.get('data_type', []), output.get('static_value', [])):
+            output['blank_default'], output.get('data_type', []), 
+            output.get('static_value', []), output['input_columns']):
             
             if method == 'groupby':
                 df = self.apply_groupby_logic(df, output)
@@ -557,7 +560,8 @@ class RepairLayer:
                 # Pass the required values to apply_formula_logic for both formula_based and static methods
                 df = self.apply_formula_logic(df, output_col, method, formula_logic, dependencies, blank_default, data_type, static_value)
             elif method == 'direct':
-                df, _ = self.apply_direct_logic(df, output)
+                # Updated to call apply_direct_logic without the loop
+                df = self.apply_direct_logic(df, input_col, output_col, blank_default)
             elif method == 'drop_rows':
                 condition_str = formula_logic
                 print(f"Dropping rows based on condition: {condition_str}")
