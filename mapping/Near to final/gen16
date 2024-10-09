@@ -1,0 +1,727 @@
+import os
+import pandas as pd
+import logging
+import nbformat as nbf
+
+# Get the current directory where the script is located
+current_directory = os.getcwd()  # Use os.getcwd() to get the working directory in Jupyter
+
+# Configure logging to log to a text file in the current folder
+log_file = os.path.join(current_directory, 'process_logs.txt')
+logging.basicConfig(level=logging.INFO, filename=log_file, filemode='w', format='%(asctime)s - %(levelname)s - %(message)s')
+
+class DataFrameProcessor:
+    """
+    Class responsible for handling the data loading and transformation process from input Excel files 
+    to final processed output. This class reads source and output information, processes the data, 
+    and logs the operations for review.
+    """
+    
+    def __init__(self, source_output_info_path):
+        """
+        Initializes the processor with the path to the Excel file containing source and output data information.
+        """
+        self.source_output_info_path = source_output_info_path
+        self.source_df = pd.read_excel(self.source_output_info_path, sheet_name='source_info')
+        self.output_df = pd.read_excel(self.source_output_info_path, sheet_name='output_info')
+
+    def parse_list_string(self, list_str):
+        """
+        Converts a comma-separated string into a list of strings.
+        """
+        if isinstance(list_str, str):
+            return [col.strip() for col in list_str.split(',')]
+        return [list_str]  # If it's a single column, wrap it in a list
+
+    def read_source_info(self):
+        """
+        Reads the source information from the Excel sheet and prepares a dictionary with relevant details for processing.
+        """
+        grouped_df = self.source_df.groupby(['input_file_path', 'data_frame_name', 'excel_worksheet']).agg({
+            'columns': list,
+            'blank_defaults': list,
+            'types': list
+        }).reset_index()
+
+        source_info = []
+        for _, row in grouped_df.iterrows():
+            source_info.append({
+                'input_file_path': f"{row['input_file_path']}",
+                'data_frame_name': row['data_frame_name'],
+                'excel_worksheet': row['excel_worksheet'],
+                'columns': row['columns'],
+                'blank_defaults': row['blank_defaults'],
+                'types': row['types']
+            })
+        return source_info
+
+
+    def read_output_info(self):
+        """
+        Reads the output information from the Excel sheet and prepares the output structure for data transformation.
+        """
+        # Group by both output_file_path and output_worksheet to handle multiple worksheets
+        grouped_df = self.output_df.groupby(['output_file_path', 'output_worksheet']).agg({
+            'Target_dataframe': list,            
+            'output_columns': list,
+            'source_dataframe': list,
+            'groupby_columns': list,  # Adding groupby columns
+            'aggregations': list,     # Adding aggregation information
+            'input_columns': list,
+            'derivation_logic': list,
+            'Merge_Dataframe': list,
+            'left_on': list,
+            'right_on': list,
+            'how': list,
+            'merge_mapping_columns': list,
+            'blank_default': list,
+            'formula_logic': list,
+            'dependencies': list,
+            'data_type': list,  # New column for data_type
+            'static_value': list  # New column for static_value
+        }).reset_index()
+
+        output_info = []
+        for _, row in grouped_df.iterrows():
+            output_columns = self.parse_list_string(','.join(row['output_columns']))
+
+            output_info.append({
+                'output_file_path': f"{row['output_file_path']}",
+                'output_worksheet': row['output_worksheet'],  # Including worksheet in grouping
+                'Target_dataframe': row['Target_dataframe'],
+                'output_columns': output_columns,  # Now this will be a list of columns
+                'source_dataframe': row['source_dataframe'],
+                'groupby_columns': row['groupby_columns'],
+                'aggregations': row['aggregations'],
+                'input_columns': row['input_columns'],
+                'derivation_logic': row['derivation_logic'],
+                'Merge_Dataframe': row['Merge_Dataframe'],
+                'left_on': [self.parse_list_string(lo) for lo in row['left_on']],
+                'right_on': [self.parse_list_string(ro) for ro in row['right_on']],
+                'how': row['how'],
+                'merge_mapping_columns': row['merge_mapping_columns'],
+                'blank_default': row['blank_default'],
+                'formula_logic': row['formula_logic'],
+                'dependencies': row['dependencies'],
+                'data_type': row['data_type'],  # Include data_type in output_info
+                'static_value': row['static_value']  # Include static_value in output_info
+            })
+        return output_info
+
+
+
+
+    def apply_formula_logic(self, df, output):
+        """
+        Apply formula-based logic to derive columns from the input DataFrame.
+        """
+        for output_col, method, formula_logic, dependencies in zip(
+                output['output_columns'], output['derivation_logic'], output['derivation_logic'], output['input_columns']):
+            if method == 'formula_based':
+                # Construct the logic dynamically for formula-based columns
+                logic_str = formula_logic
+                def apply_formula(row):
+                    return eval(logic_str, {}, row)
+
+                df[output_col] = df.apply(apply_formula, axis=1)
+                print(f"SUCCESS: Populated {output_col} using formula-based logic.")
+                logging.info(f"Populated {output_col} using formula-based logic.")
+        return df
+
+    def apply_direct_logic(self, df, output):
+        direct_input_columns = []                                     
+        for input_col, output_col, method, blank_default in zip(output['input_columns'], output['output_columns'], output['derivation_logic'], output['blank_default']):
+            if method == 'direct':
+                df[output_col] = df[input_col].fillna(blank_default)
+                print(f"SUCCESS: Populated {output_col} using direct logic from {input_col}.")
+                logging.info(f"Populated {output_col} using direct logic from {input_col}.")
+                direct_input_columns.append(input_col)
+        return df, direct_input_columns
+
+    def apply_merge_logic(self, df, output, direct_col):
+        for output_col, method, merge_df, left_on, right_on, how, merge_input_col, blank_default in zip(
+            output['output_columns'], output['derivation_logic'], output['Merge_Dataframe'],
+            output['left_on'], output['right_on'], output['how'], output['merge_mapping_columns'], output['blank_default']):
+            if method == 'merge' and merge_df != 'blank':
+                merge_df = self.dataframes[merge_df].copy()
+                left_on = self.parse_list_string(','.join(left_on))
+                right_on = self.parse_list_string(','.join(right_on))
+                right_on.append(merge_input_col)
+                df = pd.merge(df, merge_df[right_on], left_on=left_on, right_on=right_on[:-1], how=how)
+                df.rename(columns={merge_input_col: output_col}, inplace=True)
+                df[output_col] = df[output_col].fillna(blank_default)
+                print(f"SUCCESS: Populated and renamed {merge_input_col} to {output_col} using merge logic.")
+                logging.info(f"Populated and renamed {merge_input_col} to {output_col} using merge logic.")
+                for col in right_on:
+                    if col in df.columns and col != merge_input_col and col not in direct_col and col not in left_on:
+                        df.drop(columns=[col], inplace=True)
+                        print(f"SUCCESS: Dropped column {col} after merge.")
+                        logging.info(f"Dropped column {col} after merge.")
+        return df
+
+
+    def generate_layer_notebook(self, output_notebook_file):
+        """
+        Generates a Jupyter notebook that processes the data from input files to output files, 
+        applying all necessary transformations and merges.
+        """
+        source_info = self.read_source_info()
+        output_info = self.read_output_info()
+
+        # Create a new notebook
+        nb = nbf.v4.new_notebook()
+
+        # Add the markdown cell for the title
+        nb.cells.append(nbf.v4.new_markdown_cell("# Dynamic Script for Data Processing"))
+
+        # Add the markdown cell to describe the source layer
+        nb.cells.append(nbf.v4.new_markdown_cell("## Source Layer\nThis section of the code handles reading the input files."))
+
+        # Add the code for the Source Layer with print statements for logs
+        nb.cells.append(nbf.v4.new_code_cell("""
+import pandas as pd
+import logging
+import operator
+import re
+import os  
+
+class SourceLayer:
+    def __init__(self, source_info):
+        self.source_info = source_info
+        self.dataframes = {}
+
+    def load_input_files(self):
+        for info in self.source_info:
+            file_path = info['input_file_path']
+            if file_path.endswith('.xlsx') or file_path.endswith('.xls'):
+                df = pd.read_excel(file_path, sheet_name=info['excel_worksheet'])
+            else:
+                df = pd.read_csv(file_path)
+            for col, default in zip(info['columns'], info['blank_defaults']):
+                df[col] = df[col].fillna(default)
+            self.dataframes[info['data_frame_name']] = df
+            print(f"SUCCESS: Loaded data from {file_path} (Sheet: {info['excel_worksheet']}) into {info['data_frame_name']}")
+            logging.info(f"Loaded data from {file_path} (Sheet: {info['excel_worksheet']}) into {info['data_frame_name']}")
+        return self.dataframes
+        """))
+
+        # Add the markdown cell to describe the repair layer
+        nb.cells.append(nbf.v4.new_markdown_cell("## Repair Layer\nThis section of the code applies transformations and merges to the data."))
+
+        # Add the code for the Repair Layer with print statements for logs
+        nb.cells.append(nbf.v4.new_code_cell("""
+
+class RepairLayer:
+    def __init__(self, output_info, dataframes):
+        self.output_info = output_info
+        self.dataframes = dataframes
+
+    def parse_list_string(self, list_str):
+        '''Convert comma-separated string into a list of strings.'''
+        if isinstance(list_str, str):
+            return [col.strip() for col in list_str.split(',')]
+        return [list_str]  # If it's a single column, wrap it in a list
+                                             
+    def apply_direct_logic(self, df, output):
+        direct_input_columns = []                                     
+        for input_col, output_col, method, blank_default in zip(output['input_columns'], output['output_columns'], output['derivation_logic'], output['blank_default']):
+            if method == 'direct':
+                df[output_col] = df[input_col].fillna(blank_default)
+                print(f"SUCCESS: Populated {output_col} using direct logic from {input_col}.")
+                logging.info(f"Populated {output_col} using direct logic from {input_col}.")
+                direct_input_columns.append(input_col)
+                                           
+                                                                     
+        return df, direct_input_columns
+
+    def apply_merge_logic(self, df, output, direct_col):
+        for output_col, method, merge_df, left_on, right_on, how, merge_input_col, blank_default in zip(
+            output['output_columns'], output['derivation_logic'], output['Merge_Dataframe'],
+            output['left_on'], output['right_on'], output['how'], output['merge_mapping_columns'], output['blank_default']):
+
+            if method == 'merge' and merge_df != 'blank':
+                merge_df = self.dataframes[merge_df].copy()
+
+                # Ensure left_on and right_on are lists
+                left_on = self.parse_list_string(','.join(left_on))
+                right_on = self.parse_list_string(','.join(right_on))
+                right_on.append(merge_input_col)
+
+                # Perform the merge with custom suffixes to handle any potential column name collisions
+                df = pd.merge(df, merge_df[right_on], left_on=left_on, right_on=right_on[:-1], how=how, suffixes=('', '_right'))
+                
+                # Drop columns ending with '_right'
+                df.drop(df.filter(regex='_right$').columns, axis=1, inplace=True)
+
+                # Rename the merged column to the desired output column name
+                df.rename(columns={merge_input_col: output_col}, inplace=True)
+                df[output_col] = df[output_col].fillna(blank_default)
+
+                print(f"SUCCESS: Populated and renamed {merge_input_col} to {output_col} using merge logic.")
+                logging.info(f"Populated and renamed {merge_input_col} to {output_col} using merge logic.")
+
+                # Drop the columns used for right_on after performing the merge
+                for col in right_on:
+                    if col in df.columns and col != merge_input_col and col not in direct_col and col not in left_on:
+                        df.drop(columns=[col], inplace=True)
+                        print(f"SUCCESS: Dropped column {col} after merge.")
+                        logging.info(f"Dropped column {col} after merge.")
+        
+        return df
+
+                                          
+    def create_output_info_df(self,output_info):
+                                             
+        # Initialize lists to hold expanded data
+        expanded_data = {
+            'Target_dataframe': [],
+            'output_columns': []
+        }
+
+        # Loop through output_info and ensure we break down any lists into individual values
+        for item in output_info:
+            # Check if the item contains lists for Target_dataframe and output_columns
+            target_dataframes = item['Target_dataframe']
+            output_columns = item['output_columns']
+            
+            # If these fields are lists, iterate through each and add individual rows
+            if isinstance(target_dataframes, list) and isinstance(output_columns, list):
+                for target_df, output_col in zip(target_dataframes, output_columns):
+                    expanded_data['Target_dataframe'].append(target_df)
+                    expanded_data['output_columns'].append(output_col)
+            else:
+                # If they are not lists, directly add them as they are
+                expanded_data['Target_dataframe'].append(target_dataframes)
+                expanded_data['output_columns'].append(output_columns)
+        
+        # Convert the expanded data into a DataFrame
+        output_info_df = pd.DataFrame(expanded_data)
+        
+        return output_info_df
+
+    def parse_formula(self, formula_logic, df, dependencies, output_type):
+        # Mapping for operators
+        ops = {
+            '+': operator.add,
+            '-': operator.sub,
+            '*': operator.mul,
+            '/': operator.truediv,
+        }
+
+        # Convert the formula logic to lowercase for case-insensitivity
+        formula_logic_lower = formula_logic.lower()
+
+
+        # Check if the formula contains an operator
+        for op_symbol, op_func in ops.items():
+            if op_symbol in formula_logic_lower:
+                # Split the formula by the operator to get the operands
+                operands = formula_logic.split(op_symbol)
+                operand1 = operands[0].strip()
+                operand2 = operands[1].strip()
+
+                # Check if operand1 is a column in the dataframe or a literal value
+                if operand1 in df.columns:
+                    operand1_value = df[operand1]
+                else:
+                    try:
+                        operand1_value = float(operand1)  # Convert literal to float or appropriate type
+                    except ValueError:
+                        raise ValueError(f"Invalid value for operand1: {operand1}")
+
+                # Check if operand2 is a column in the dataframe or a literal value
+                if operand2 in df.columns:
+                    operand2_value = df[operand2]
+                else:
+                    try:
+                        operand2_value = float(operand2)  # Convert literal to float or appropriate type
+                    except ValueError:
+                        raise ValueError(f"Invalid value for operand2: {operand2}")
+
+                # Apply the operator function
+                result = op_func(operand1_value, operand2_value)
+
+                # Return the result, cast to the correct type if necessary
+                if output_type == 'float':
+                    return result.astype(float)
+                elif output_type == 'int':
+                    return result.astype(int)
+                else:
+                    return result.astype(object)                                             
+
+
+        # Example: 'IF condition THEN value1 ELSE value2' logic
+        if 'if' in formula_logic_lower:
+            # Parse the if-then-else logic
+            tokens = formula_logic.split()
+            if_idx = tokens.index(next(token for token in tokens if token.lower() == 'if'))
+            then_idx = tokens.index(next(token for token in tokens if token.lower() == 'then'))
+            else_idx = tokens.index(next(token for token in tokens if token.lower() == 'else'))
+
+            condition = tokens[if_idx + 1:then_idx]
+            then_value = tokens[then_idx + 1:else_idx]
+            else_value = tokens[else_idx + 1:]
+
+            # Ensure that columns are referenced properly as df['column_name']
+            condition_str = ' '.join([f"df['{token}']" if token in df.columns else token for token in condition])
+
+            print(f"Evaluating condition: {condition_str}")  # Debug print
+
+            # Evaluate the condition using eval
+            df['condition'] = eval(condition_str)
+
+            # Apply the then/else logic based on the condition
+            result = df['condition'].apply(
+                lambda x: eval(' '.join([f"df['{val}']" if val in df.columns else val for val in then_value])) if x else eval(' '.join([f"df['{val}']" if val in df.columns else val for val in else_value]))
+            )
+
+            # Convert to the required output type
+            if output_type == 'float':
+                result = result.astype(float)
+            elif output_type == 'int':
+                result = result.astype(int)
+            else:
+                result = result.astype(object)
+
+            # Drop temporary 'condition' column
+            df.drop(columns=['condition'], inplace=True)
+
+            return result
+
+        # Handle 'astype' operations
+        if 'astype' in formula_logic:
+            # Extract column and type
+            column_name = formula_logic.split('.')[0]
+            cast_type = formula_logic.split("astype('")[1].split("')")[0]
+
+            # Create a temporary column to ensure the input column is not modified
+            temp_column_name = f"temp_{column_name}"
+            df[temp_column_name] = df[column_name].copy()
+
+            # Cast the temporary column to the specified type
+            df[temp_column_name] = df[temp_column_name].astype(cast_type)
+            
+            return df[temp_column_name]
+
+        # Handle 'str' operations with slicing (e.g., output_a1.str[1:2] or output_a1.str[:2])
+        if '.str' in formula_logic and '[' in formula_logic and ']' in formula_logic:
+            try:
+                column_name = formula_logic.split('.')[0]
+                slice_str = formula_logic.split('[')[1].split(']')[0]
+
+                # Create a temporary column to ensure the input column is not modified
+                temp_column_name = f"temp_{column_name}"
+                df[temp_column_name] = df[column_name].copy()
+
+                # Handle cases like [:2] or [1:] where start or end may be missing
+                slice_parts = slice_str.split(':')
+
+                # Set start and end, accounting for missing values
+                if len(slice_parts) == 2:
+                    start = int(slice_parts[0]) if slice_parts[0] else None  # Use None if start is empty
+                    end = int(slice_parts[1]) if slice_parts[1] else None  # Use None if end is empty
+                elif len(slice_parts) == 1:
+                    start = int(slice_parts[0]) if slice_parts[0] else None
+                    end = None
+                else:
+                    raise ValueError(f"Invalid slice format: {slice_str}")
+
+                # Apply slicing to the temporary column, using .str[start:end]
+                df[temp_column_name] = df[temp_column_name].astype(str).str[start:end]
+                return df[temp_column_name]
+            except Exception as e:
+                raise ValueError(f"Unsupported formula logic: {formula_logic}. Error: {str(e)}")
+
+
+
+    def apply_formula_logic(self, df, output):
+        \"""
+        Apply formula-based and static logic to derive columns from the input DataFrame.
+        \"""
+        for output_col, method, formula_logic, dependencies, blank_default, data_type, static_value in zip(
+                output['output_columns'], output['derivation_logic'], output['formula_logic'], 
+                output['dependencies'],output['blank_default'] , output.get('data_type', []), output.get('static_value', [])):
+
+            # Default output_type to 'object' if not present
+            output_type = output.get('output_type', ['object'])  # Defaulting to 'object' if missing
+
+            if method == 'formula_based':
+                # Parse dependencies (i.e., input columns)
+                dependency_columns = self.parse_list_string(dependencies)
+
+                # Apply the formula using the parse_formula method
+                result = self.parse_formula(formula_logic, df, dependency_columns, output_type[0])
+
+                # Assign the result to the correct output column
+                df[output_col] = result
+
+                print(f"SUCCESS: Populated {output_col} using formula-based logic.")
+                logging.info(f"Populated {output_col} using formula-based logic.")
+            
+            elif method == 'static':
+                # Check if formula_logic is 'blank'
+                if formula_logic.lower() == 'blank':
+                    # Apply the static value to all rows
+                    df[output_col] = static_value
+                else:
+                    # Apply the static value only where formula_logic condition is met
+                    condition_str = formula_logic
+                    df.loc[df.eval(condition_str), output_col] = static_value
+
+                # Apply the correct data type if necessary
+                if data_type == 'int64':
+                    df[output_col] = pd.to_numeric(df[output_col], errors='coerce').fillna(blank_default).astype(int)
+                elif data_type == 'float64':
+                    df[output_col] = pd.to_numeric(df[output_col], errors='coerce').fillna(blank_default).astype(float)
+                elif data_type == 'object':
+                    df[output_col] = df[output_col].fillna(blank_default).astype(str)
+                else:
+                    df[output_col] = df[output_col].fillna(blank_default).astype(object)  # Default to object type
+                                             
+                print(f"SUCCESS: Populated {output_col} with static value {static_value} of type {data_type}.")
+                logging.info(f"Populated {output_col} with static value {static_value} of type {data_type}.")
+                
+        return df
+                                                                   
+
+    def apply_groupby_logic(self, df, output):
+        print("Step 1: Found 'groupby_columns' and 'aggregations' in output.")
+
+        # Handle groupby columns (allow comma-separated strings or lists)
+        if isinstance(output["groupby_columns"][0], str):
+            groupby_columns = [col.strip() for col in output["groupby_columns"][0].split(',')]
+        else:
+            groupby_columns = output["groupby_columns"]
+
+        # Ensure all groupby columns exist in the DataFrame
+        groupby_columns = [col for col in groupby_columns if col in df.columns]
+        print(f"Step 2: Grouping by columns: {groupby_columns}")
+
+        # Parse the aggregations
+        print("Step 3: Parsing aggregations...")
+        print(f"Aggregations string: {output['aggregations'][0]}")
+
+        aggregations = {}
+        print("Parsing aggregations...")
+
+        # Split the aggregations by comma to handle multiple aggregations
+        aggregations_str = output["aggregations"][0]
+        for item in aggregations_str.split('},'):
+            item = item.strip() + '}' if not item.endswith('}') else item.strip()
+            try:
+                key, value = item.split(': {')
+                key = key.strip()  # this key is not used since we will derive the output columns from the groupby columns
+                col_name, agg_func = value.replace('}', '').split(', ')
+                col_name = col_name.split(': ')[1].strip()  # The column name to be aggregated
+                agg_func = agg_func.split(': ')[1].strip()  # The aggregation function
+                aggregations[col_name] = agg_func
+            except Exception as e:
+                print(f"ERROR: Failed to parse aggregation '{item}' - {e}")
+                logging.error(f"Failed to parse aggregation '{item}' - {e}")
+
+        # Build the aggregation dictionary for groupby
+        agg_dict = {col_name: agg_func for col_name, agg_func in aggregations.items()}
+
+        print(f"Step 4: Aggregation dictionary for groupby: {agg_dict}")
+
+        # Apply groupby and aggregations, ensure columns exist for both groupby and aggregation
+        try:
+            # Automatically infer output columns by combining groupby columns and aggregation columns
+            grouped_df = df.groupby(groupby_columns).agg(agg_dict).reset_index()
+            print(f"Step 5: Groupby applied. Resulting DataFrame shape: {grouped_df.shape}")
+        except KeyError as e:
+            print(f"ERROR: {e} - Columns missing for groupby or aggregation.")
+            logging.error(f"ERROR: {e} - Groupby operation failed due to missing columns.")
+            return df  # Return the original DataFrame if groupby fails
+
+        # Step 7: Return the grouped DataFrame
+        return grouped_df
+
+    def apply_logic(self, df, output):
+        \"""
+        Apply different logic (e.g., groupby, merge, static, formula-based) dynamically based on the derivation logic.
+        \"""
+        print("Applying logic...")
+        logging.info("Applying logic...")
+
+        for method, formula_logic, dependencies, output_col in zip(
+                output['derivation_logic'], output['formula_logic'], output['dependencies'], output['output_columns']):
+
+            # Handle groupby logic
+            if method == 'groupby':
+                groupby_columns = output['groupby_columns']
+                aggregations = output['aggregations']
+                print(f"Applying groupby logic on columns: {groupby_columns} with aggregations: {aggregations}")
+                df = self.apply_groupby_logic(df, output)
+                return df
+
+            # Handle merge logic
+            elif method == 'merge':
+                left_on = output['left_on']
+                right_on = output['right_on']
+                how = output['how']
+                merge_df = output['Merge_Dataframe']
+                print(f"Applying merge logic between source and {merge_df} on {left_on} and {right_on} with {how} join")
+                df = self.apply_merge_logic(df, output, left_on, right_on, how)
+                return df
+
+            # Handle formula-based logic
+            elif method == 'formula_based':
+                print(f"Applying formula-based logic on {output_col} using formula: {formula_logic}")
+                df = self.apply_formula_logic(df, output)
+                return df
+
+            # Handle drop rows
+            elif method == 'drop_rows':
+                condition_str = formula_logic
+                print(f"Dropping rows based on condition: {condition_str}")
+                indices_to_drop = df.query(condition_str).index
+                df = df.drop(indices_to_drop)
+                logging.info(f"Dropped rows based on logic: {formula_logic}")
+                return df
+
+            # Handle drop columns
+            elif method == 'drop_column':
+                columns_to_drop = self.parse_list_string(dependencies)
+                df.drop(columns=columns_to_drop, inplace=True)
+                print(f"SUCCESS: Dropped columns: {dependencies}")
+                logging.info(f"Dropped columns: {dependencies}")
+                return df
+
+            # Handle append logic
+            elif method == 'append':
+                source_dataframes = self.parse_list_string(output['source_dataframe'][0])
+                target_df_name = output['Target_dataframe'][0]
+                dataframes_to_concat = [self.dataframes[source_df] for source_df in source_dataframes]
+                if len(dataframes_to_concat) > 0:
+                    concatenated_df = pd.concat(dataframes_to_concat, ignore_index=True)
+                    self.dataframes[target_df_name] = concatenated_df
+                    print(f"SUCCESS: Concatenated {source_dataframes} into {target_df_name}")
+                    logging.info(f"Concatenated {source_dataframes} into {target_df_name}")
+                else:
+                    print(f"ERROR: No DataFrames found to concatenate.")
+                    logging.error(f"No DataFrames found to concatenate.")
+                return df
+
+        return df
+                                            
+    def process_data(self):
+        for output in self.output_info:
+            # Handle comma-separated source_dataframe names
+            source_dataframes_str = output['source_dataframe'][0]  # Get the first entry, which might be comma-separated
+            source_dataframes = self.parse_list_string(source_dataframes_str)  # Convert to list of DataFrames
+
+            target_df_name = output['Target_dataframe'][0]
+            df = None  # Initialize df as None
+
+            # Load or create DataFrame logic
+            if len(source_dataframes) > 1:
+                dataframes_to_concat = []
+                for source_df_name in source_dataframes:
+                    if source_df_name in self.dataframes:
+                        dataframes_to_concat.append(self.dataframes[source_df_name].copy())
+                    else:
+                        print(f"WARNING: Source dataframe {source_df_name} not found.")
+                if len(dataframes_to_concat) > 0:
+                    df = pd.concat(dataframes_to_concat, ignore_index=True)
+                else:
+                    df = pd.DataFrame()  # Create empty DataFrame
+                    print("INFO: Initialized empty DataFrame.")
+            else:
+                source_df_name = source_dataframes[0]
+                if source_df_name in self.dataframes:
+                    df = self.dataframes[source_df_name].copy()
+                else:
+                    df = pd.DataFrame()  # Create empty DataFrame
+                    print(f"INFO: Initialized empty DataFrame for {source_df_name}.")
+
+            # Apply all logic dynamically
+            for method in output['derivation_logic']:
+                if method == 'direct':
+                    df, direct_input_columns = self.apply_direct_logic(df, output)
+                elif method == 'merge':
+                    df = self.apply_merge_logic(df, output, direct_input_columns)
+                elif method == 'formula_based' or method == 'static':
+                    df = self.apply_formula_logic(df, output)
+                elif method in ['drop_rows', 'drop_column', 'append', 'groupby']:
+                    df = self.apply_logic(df, output)
+
+            # Ensure only required columns are kept in the DataFrame if logic is not append
+            if 'merge' in output['derivation_logic'] or 'direct' in output['derivation_logic']:
+                required_columns = output['output_columns']
+                available_columns = [col for col in required_columns if col in df.columns]
+                df = df[available_columns]  # Select only the columns specified in output_columns
+
+            # Store the processed DataFrame
+            self.dataframes[target_df_name] = df
+
+        return self.dataframes
+        """))
+
+        # Add the markdown cell to describe the report layer
+        nb.cells.append(nbf.v4.new_markdown_cell("## Report Layer\nThis section of the code handles saving the output files."))
+
+        # Add the code for the Report Layer with print statements for logs
+        nb.cells.append(nbf.v4.new_code_cell("""
+class ReportLayer:
+    def __init__(self, processed_data):
+        self.processed_data = processed_data
+
+    def save_output(self, output_info):
+        \"""
+        Saves the processed data to the specified Excel files and worksheets.
+        If the file exists, it updates only the specified sheet; if not, it creates the file.
+        \"""
+        # Loop through each output info entry
+        for output in output_info:
+            output_file_path = output['output_file_path']
+            output_worksheet = output.get('output_worksheet', 'Sheet1')  # Default to 'Sheet1' if not provided
+
+            # Get the DataFrame to be written
+            df = self.processed_data[output['Target_dataframe'][0]]
+            
+            if os.path.exists(output_file_path):
+                # If the file exists, open it with openpyxl, load the workbook, and remove the existing sheet
+                with pd.ExcelWriter(output_file_path, mode='a', engine='openpyxl', if_sheet_exists='replace') as writer:
+                    # Write the DataFrame to the specified sheet, replacing it if it exists
+                    df.to_excel(writer, sheet_name=output_worksheet, index=False)
+                    print(f"SUCCESS: Updated sheet '{output_worksheet}' in file '{output_file_path}'")
+                    logging.info(f"Updated sheet '{output_worksheet}' in file '{output_file_path}'")
+            else:
+                # If the file does not exist, create a new file and write the DataFrame
+                with pd.ExcelWriter(output_file_path, engine='openpyxl') as writer:
+                    df.to_excel(writer, sheet_name=output_worksheet, index=False)
+                    print(f"SUCCESS: Created file '{output_file_path}' with sheet '{output_worksheet}'")
+                    logging.info(f"Created file '{output_file_path}' with sheet '{output_worksheet}'")
+        """))
+
+        # Add a final code cell for the example usage
+        nb.cells.append(nbf.v4.new_markdown_cell("## Example Usage\nThis section shows how to use the classes defined above."))
+
+        nb.cells.append(nbf.v4.new_code_cell(f"""
+if __name__ == '__main__':
+    source_info = {source_info}
+    output_info = {output_info}
+    
+    source_layer = SourceLayer(source_info)
+    dataframes = source_layer.load_input_files()
+
+    repair_layer = RepairLayer(output_info, dataframes)
+    processed_data = repair_layer.process_data()
+
+    report_layer = ReportLayer(processed_data)
+    report_layer.save_output(output_info)
+    """))
+
+        # Save the notebook
+        with open(output_notebook_file, 'w') as f:
+            nbf.write(nb, f)
+
+        print(f"Jupyter notebook has been generated and saved to {output_notebook_file}")
+
+# Example usage
+source_output_info_path = 'source_output_info.xlsx'  # Path to the Excel file
+output_notebook_file = 'layer_script_generated.ipynb'  # Output Jupyter Notebook path
+
+processor = DataFrameProcessor(source_output_info_path)
+processor.generate_layer_notebook(output_notebook_file)
