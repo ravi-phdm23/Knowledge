@@ -377,6 +377,39 @@ class RepairLayer:
         except Exception as e:
             raise ValueError(f"Unsupported formula logic: {formula_logic}. Error: {str(e)}")
 
+    def handle_concat_logic(self, formula_logic, df):
+        \"\"\"
+        Handle concatenation logic for 'concat' expressions in the formula.
+        This method can handle both columns and literal strings.
+        \"\"\"
+
+        # Remove 'concat(' and ')' and split the items by commas
+        concat_elements = formula_logic.replace('concat(', '').replace(')', '').split(',')
+
+        # Initialize an empty list to hold the processed values
+        concat_values = []
+
+        for elem in concat_elements:
+            elem = elem.strip().strip("'\\"")  # Remove surrounding quotes or extra spaces
+
+            if '.str' in elem:
+                # Handle string slicing if present
+                value = self.handle_str_slicing(df, elem)
+            elif elem in df.columns:
+                # If it's a column, get the column value
+                value = df[elem].astype(str)
+            else:
+                # Otherwise, treat it as a literal string
+                value = pd.Series([elem] * len(df))  # Create a series of the literal string for each row
+
+            concat_values.append(value)
+
+        # Concatenate all values across rows
+        result = pd.concat(concat_values, axis=1).agg(''.join, axis=1)
+
+        return result
+
+
 
     def parse_formula(self, formula_logic, df, dependencies, output_type):
         # Mapping for operators
@@ -386,6 +419,9 @@ class RepairLayer:
             '*': operator.mul,
             '/': operator.truediv,
         }
+
+        if 'concat' in formula_logic:
+            return self.handle_concat_logic(formula_logic, df)                                             
 
         # Normalize output_type: Treat 'int' and 'int64' the same, and 'float' and 'float64' the same
         if output_type in ['int', 'int64']:
@@ -435,7 +471,6 @@ class RepairLayer:
         else:
             return result.astype(object)
 
-
     def apply_formula_logic(self, df, output_col, method, formula_logic, dependencies, blank_default, data_type=None, static_value=None):
         \"""
         Apply formula-based and static logic to derive columns from the input DataFrame.
@@ -448,8 +483,12 @@ class RepairLayer:
             # Parse dependencies (i.e., input columns)
             dependency_columns = self.parse_list_string(dependencies)
 
-            # Apply the formula using the parse_formula method
-            result = self.parse_formula(formula_logic, df, dependency_columns, output_type)
+            # Handle the concatenation logic specifically
+            if 'concat' in formula_logic:
+                result = self.handle_concat_logic(formula_logic, df)
+            else:
+                # Apply the formula using the parse_formula method for other cases
+                result = self.parse_formula(formula_logic, df, dependency_columns, output_type)
 
             # Assign the result to the correct output column
             df[output_col] = result
@@ -476,7 +515,7 @@ class RepairLayer:
                 df[output_col] = df[output_col].fillna(blank_default).astype(str)
             else:
                 df[output_col] = df[output_col].fillna(blank_default).astype(object)  # Default to object type
-                                         
+                                        
             print(f"SUCCESS: Populated {output_col} with static value {static_value} of type {data_type}.")
             logging.info(f"Populated {output_col} with static value {static_value} of type {data_type}.")
 
