@@ -434,54 +434,52 @@ class RepairLayer:
 
 
 
-    def apply_formula_logic(self, df, output):
+    def apply_formula_logic(self, df, output_col, method, formula_logic, dependencies, blank_default, data_type=None, static_value=None):
         \"""
         Apply formula-based and static logic to derive columns from the input DataFrame.
+        This method processes one formula at a time instead of looping through all columns.
         \"""
-        for output_col, method, formula_logic, dependencies, blank_default, data_type, static_value in zip(
-                output['output_columns'], output['derivation_logic'], output['formula_logic'], 
-                output['dependencies'],output['blank_default'] , output.get('data_type', []), output.get('static_value', [])):
+        # Default output_type to 'object' if not present
+        output_type = data_type if data_type else 'object'  # Defaulting to 'object' if data_type is not provided
 
-            # Default output_type to 'object' if not present
-            output_type = output.get('output_type', ['object'])  # Defaulting to 'object' if missing
+        if method == 'formula_based':
+            # Parse dependencies (i.e., input columns)
+            dependency_columns = self.parse_list_string(dependencies)
 
-            if method == 'formula_based':
-                # Parse dependencies (i.e., input columns)
-                dependency_columns = self.parse_list_string(dependencies)
+            # Apply the formula using the parse_formula method
+            result = self.parse_formula(formula_logic, df, dependency_columns, output_type)
 
-                # Apply the formula using the parse_formula method
-                result = self.parse_formula(formula_logic, df, dependency_columns, output_type[0])
+            # Assign the result to the correct output column
+            df[output_col] = result
 
-                # Assign the result to the correct output column
-                df[output_col] = result
+            print(f"SUCCESS: Populated {output_col} using formula-based logic.")
+            logging.info(f"Populated {output_col} using formula-based logic.")
+        
+        elif method == 'static':
+            # Check if formula_logic is 'blank'
+            if formula_logic.lower() == 'blank':
+                # Apply the static value to all rows
+                df[output_col] = static_value
+            else:
+                # Apply the static value only where formula_logic condition is met
+                condition_str = formula_logic
+                df.loc[df.eval(condition_str), output_col] = static_value
 
-                print(f"SUCCESS: Populated {output_col} using formula-based logic.")
-                logging.info(f"Populated {output_col} using formula-based logic.")
-            
-            elif method == 'static':
-                # Check if formula_logic is 'blank'
-                if formula_logic.lower() == 'blank':
-                    # Apply the static value to all rows
-                    df[output_col] = static_value
-                else:
-                    # Apply the static value only where formula_logic condition is met
-                    condition_str = formula_logic
-                    df.loc[df.eval(condition_str), output_col] = static_value
+            # Apply the correct data type if necessary
+            if data_type == 'int64':
+                df[output_col] = pd.to_numeric(df[output_col], errors='coerce').fillna(blank_default).astype(int)
+            elif data_type == 'float64':
+                df[output_col] = pd.to_numeric(df[output_col], errors='coerce').fillna(blank_default).astype(float)
+            elif data_type == 'object':
+                df[output_col] = df[output_col].fillna(blank_default).astype(str)
+            else:
+                df[output_col] = df[output_col].fillna(blank_default).astype(object)  # Default to object type
+                                         
+            print(f"SUCCESS: Populated {output_col} with static value {static_value} of type {data_type}.")
+            logging.info(f"Populated {output_col} with static value {static_value} of type {data_type}.")
 
-                # Apply the correct data type if necessary
-                if data_type == 'int64':
-                    df[output_col] = pd.to_numeric(df[output_col], errors='coerce').fillna(blank_default).astype(int)
-                elif data_type == 'float64':
-                    df[output_col] = pd.to_numeric(df[output_col], errors='coerce').fillna(blank_default).astype(float)
-                elif data_type == 'object':
-                    df[output_col] = df[output_col].fillna(blank_default).astype(str)
-                else:
-                    df[output_col] = df[output_col].fillna(blank_default).astype(object)  # Default to object type
-                                             
-                print(f"SUCCESS: Populated {output_col} with static value {static_value} of type {data_type}.")
-                logging.info(f"Populated {output_col} with static value {static_value} of type {data_type}.")
-                
         return df
+
                                                                    
 
     def apply_groupby_logic(self, df, output):
@@ -539,73 +537,53 @@ class RepairLayer:
 
     def apply_logic(self, df, output):
         \"""
-        Apply different logic (e.g., groupby, merge, static, formula-based) dynamically based on the derivation logic.
+        Apply different logic (e.g., groupby, merge, static, formula-based) dynamically 
+        in the order specified in the derivation logic.
         \"""
-        print("Applying logic...")
-        logging.info("Applying logic...")
+        print("Applying logic in specified order...")
+        logging.info("Applying logic in specified order...")
 
-        for method, formula_logic, dependencies, output_col in zip(
-                output['derivation_logic'], output['formula_logic'], output['dependencies'], output['output_columns']):
-
-            # Handle groupby logic
+        # Iterate over the list of derivation logic to apply each logic step in order
+        for method, output_col, formula_logic, dependencies, blank_default, data_type, static_value in zip(
+            output['derivation_logic'], output['output_columns'], 
+            output['formula_logic'], output['dependencies'], 
+            output['blank_default'], output.get('data_type', []), output.get('static_value', [])):
+            
             if method == 'groupby':
-                groupby_columns = output['groupby_columns']
-                aggregations = output['aggregations']
-                print(f"Applying groupby logic on columns: {groupby_columns} with aggregations: {aggregations}")
                 df = self.apply_groupby_logic(df, output)
-                return df
-
-            # Handle merge logic
             elif method == 'merge':
-                left_on = output['left_on']
-                right_on = output['right_on']
-                how = output['how']
-                merge_df = output['Merge_Dataframe']
-                print(f"Applying merge logic between source and {merge_df} on {left_on} and {right_on} with {how} join")
-                df = self.apply_merge_logic(df, output, left_on, right_on, how)
-                return df
-
-            # Handle formula-based logic
-            elif method == 'formula_based':
-                print(f"Applying formula-based logic on {output_col} using formula: {formula_logic}")
-                df = self.apply_formula_logic(df, output)
-                return df
-
-            # Handle drop rows
+                df = self.apply_merge_logic(df, output, [])
+            elif method in ['formula_based', 'static']:
+                # Pass the required values to apply_formula_logic for both formula_based and static methods
+                df = self.apply_formula_logic(df, output_col, method, formula_logic, dependencies, blank_default, data_type, static_value)
+            elif method == 'direct':
+                df, _ = self.apply_direct_logic(df, output)
             elif method == 'drop_rows':
                 condition_str = formula_logic
                 print(f"Dropping rows based on condition: {condition_str}")
                 indices_to_drop = df.query(condition_str).index
                 df = df.drop(indices_to_drop)
                 logging.info(f"Dropped rows based on logic: {formula_logic}")
-                return df
-
-            # Handle drop columns
             elif method == 'drop_column':
                 columns_to_drop = self.parse_list_string(dependencies)
                 df.drop(columns=columns_to_drop, inplace=True)
                 print(f"SUCCESS: Dropped columns: {dependencies}")
                 logging.info(f"Dropped columns: {dependencies}")
-                return df
-
-            # Handle append logic
             elif method == 'append':
                 source_dataframes = self.parse_list_string(output['source_dataframe'][0])
                 target_df_name = output['Target_dataframe'][0]
                 dataframes_to_concat = [self.dataframes[source_df] for source_df in source_dataframes]
-                if len(dataframes_to_concat) > 0:
-                    concatenated_df = pd.concat(dataframes_to_concat, ignore_index=True)
-                    self.dataframes[target_df_name] = concatenated_df
-                    print(f"SUCCESS: Concatenated {source_dataframes} into {target_df_name}")
-                    logging.info(f"Concatenated {source_dataframes} into {target_df_name}")
-                else:
-                    print(f"ERROR: No DataFrames found to concatenate.")
-                    logging.error(f"No DataFrames found to concatenate.")
-                return df
+                df = pd.concat(dataframes_to_concat, ignore_index=True)
+                print(f"SUCCESS: Concatenated {source_dataframes} into {target_df_name}")
+                logging.info(f"Concatenated {source_dataframes} into {target_df_name}")
 
         return df
-                                            
+
+
     def process_data(self):
+        \"""
+        Processes data according to the output_info and applies the logic in the specified order.
+        \"""
         for output in self.output_info:
             # Handle comma-separated source_dataframe names
             source_dataframes_str = output['source_dataframe'][0]  # Get the first entry, which might be comma-separated
@@ -635,27 +613,20 @@ class RepairLayer:
                     df = pd.DataFrame()  # Create empty DataFrame
                     print(f"INFO: Initialized empty DataFrame for {source_df_name}.")
 
-            # Apply all logic dynamically
-            for method in output['derivation_logic']:
-                if method == 'direct':
-                    df, direct_input_columns = self.apply_direct_logic(df, output)
-                elif method == 'merge':
-                    df = self.apply_merge_logic(df, output, direct_input_columns)
-                elif method == 'formula_based' or method == 'static':
-                    df = self.apply_formula_logic(df, output)
-                elif method in ['drop_rows', 'drop_column', 'append', 'groupby']:
-                    df = self.apply_logic(df, output)
+            # Apply all logic dynamically using the apply_logic method
+            df = self.apply_logic(df, output)
 
             # Ensure only required columns are kept in the DataFrame if logic is not append
-            if 'merge' in output['derivation_logic'] or 'direct' in output['derivation_logic']:
-                required_columns = output['output_columns']
-                available_columns = [col for col in required_columns if col in df.columns]
-                df = df[available_columns]  # Select only the columns specified in output_columns
+            required_columns = output['output_columns']
+            available_columns = [col for col in required_columns if col in df.columns]
+            df = df[available_columns]  # Select only the columns specified in output_columns
 
             # Store the processed DataFrame
             self.dataframes[target_df_name] = df
 
         return self.dataframes
+
+
         """))
 
         # Add the markdown cell to describe the report layer
