@@ -109,8 +109,6 @@ class DataFrameProcessor:
         return output_info
 
 
-
-
     def apply_formula_logic(self, df, output):
         """
         Apply formula-based logic to derive columns from the input DataFrame.
@@ -128,6 +126,7 @@ class DataFrameProcessor:
                 logging.info(f"Populated {output_col} using formula-based logic.")
         return df
 
+
     def apply_direct_logic(self, df, output):
         direct_input_columns = []                                     
         for input_col, output_col, method, blank_default in zip(output['input_columns'], output['output_columns'], output['derivation_logic'], output['blank_default']):
@@ -137,6 +136,7 @@ class DataFrameProcessor:
                 logging.info(f"Populated {output_col} using direct logic from {input_col}.")
                 direct_input_columns.append(input_col)
         return df, direct_input_columns
+
 
     def apply_merge_logic(self, df, output, direct_col):
         for output_col, method, merge_df, left_on, right_on, how, merge_input_col, blank_default in zip(
@@ -297,30 +297,83 @@ class RepairLayer:
         
         return output_info_df
 
-
+                                             
     def handle_if_else_logic(self, df, formula_logic, output_type):
-        # Parse the if-then-else logic
+        # Tokenize the formula_logic string for multiple conditions like if-elif-else
         tokens = formula_logic.split()
-        if_idx = tokens.index(next(token for token in tokens if token.lower() == 'if'))
-        then_idx = tokens.index(next(token for token in tokens if token.lower() == 'then'))
-        else_idx = tokens.index(next(token for token in tokens if token.lower() == 'else'))
+        
+        # Debugging: Print the tokens parsed from formula_logic
+        print(f"Tokens from formula_logic: {tokens}")
+        
+        conditions = []
+        then_values = []
+        else_value = None
 
-        condition = tokens[if_idx + 1:then_idx]
-        then_value = tokens[then_idx + 1:else_idx]
-        else_value = tokens[else_idx + 1:]
+        i = 0
+        while i < len(tokens):
+            token = tokens[i].lower()
+            print(f"Processing token: {token}")  # Debug print
+            
+            if token == 'if' or token == 'elif':
+                # Parse the condition between 'if'/'elif' and 'then'
+                condition = []
+                i += 1
+                while i < len(tokens) and tokens[i].lower() != 'then':
+                    condition.append(tokens[i])
+                    i += 1
+                conditions.append(' '.join(condition))
+                print(f"Parsed condition: {' '.join(condition)}")  # Debug print
+                
+            elif token == 'then':
+                # Parse the then_value after 'then' (next token)
+                i += 1
+                then_value = tokens[i]
+                then_values.append(then_value)
+                print(f"Parsed then_value: {then_value}")  # Debug print
+                i += 1  # Move to the next token (either elif or else)
+                
+            elif token == 'else':
+                # Parse the else_value after 'else'
+                i += 1
+                else_value = ' '.join(tokens[i:])
+                print(f"Parsed else_value: {else_value}")  # Debug print
+                break
 
-        # Ensure that columns are referenced properly as df['column_name']
-        condition_str = ' '.join([f"df['{token}']" if token in df.columns else token for token in condition])
+        # Debug: Print conditions and then_values
+        print(f"Conditions: {conditions}, Then_values: {then_values}, Else_value: {else_value}")
+        
+        # Check if conditions and then_values have been populated correctly
+        if not conditions or not then_values:
+            print("No conditions or then_values found!")  # Debug print
+            return df  # Return the unmodified DataFrame if no conditions/then_values found
 
-        print(f"Evaluating condition: {condition_str}")  # Debug print
+        # Apply the conditions one by one and store the result
+        result = pd.Series([None] * len(df))
 
-        # Evaluate the condition using eval
-        df['condition'] = eval(condition_str)
+        for condition, then_value in zip(conditions, then_values):
+            print(f"Condition: {condition}, Then: {then_value}")  # Debug print
+            condition_str = ' '.join([f"df['{token}']" if token in df.columns else token for token in condition.split()])
+            print(f"Evaluating condition: {condition_str}")  # Debug print
 
-        # Apply the then/else logic based on the condition
-        result = df['condition'].apply(
-            lambda x: eval(' '.join([f"df['{val}']" if val in df.columns else val for val in then_value])) if x else eval(' '.join([f"df['{val}']" if val in df.columns else val for val in else_value]))
-        )
+            # Evaluate the condition using eval
+            df['condition'] = eval(condition_str)
+
+            # Apply the 'then' value where the condition is true
+            if then_value.startswith("'") and then_value.endswith("'"):  # Handle string literals
+                result = result.where(~df['condition'], then_value.strip("'"))
+            else:
+                result = result.where(~df['condition'], df[then_value])
+
+        # Apply the 'else' value where no condition was true
+        if else_value:
+            if else_value.startswith("'") and else_value.endswith("'"):  # Handle string literals
+                result = result.where(result.notnull(), else_value.strip("'"))
+            else:
+                result = result.where(result.notnull(), df[else_value])
+
+        # Drop the temporary 'condition' column only if it exists
+        if 'condition' in df.columns:
+            df.drop(columns=['condition'], inplace=True)
 
         # Convert to the required output type
         if output_type == 'float':
@@ -330,10 +383,9 @@ class RepairLayer:
         else:
             result = result.astype(object)
 
-        # Drop temporary 'condition' column
-        df.drop(columns=['condition'], inplace=True)
-
         return result
+
+
 
     def handle_astype_logic(self, df, formula_logic):
         # Extract column and type
@@ -420,6 +472,11 @@ class RepairLayer:
             '/': operator.truediv,
         }
 
+        # Check if the formula contains 'if', 'then', 'else', or 'elif' logic
+        if 'if' in formula_logic.lower() and ('then' in formula_logic.lower() and 'else' in formula_logic.lower()):
+            # Call the handle_if_else_logic function to process if-then-else-elif logic
+            return self.handle_if_else_logic(df, formula_logic, output_type)
+
         if 'concat' in formula_logic:
             return self.handle_concat_logic(formula_logic, df)                                             
 
@@ -430,7 +487,7 @@ class RepairLayer:
             output_type = 'float64'
 
         # Use regex to split the formula by operators while keeping the operators in the result
-        tokens = re.split(r'(\\+|\\-|\\*|/)', formula_logic)
+        tokens = re.split(r'(\\+|\\-|\\*|\\/)', formula_logic)
 
         # Initialize the result to None
         result = None
@@ -456,12 +513,12 @@ class RepairLayer:
                         except ValueError:
                             raise ValueError(f"Invalid value: {token}")
 
-                # If result is None, this is the first operand
-                if result is None:
-                    result = operand_value
-                else:
-                    # Apply the current operator between the result and the operand
-                    result = current_operator(result, operand_value)
+                    # If result is None, this is the first operand
+                    if result is None:
+                        result = operand_value
+                    else:
+                        # Apply the current operator between the result and the operand
+                        result = current_operator(result, operand_value)
 
         # Return the result, cast to the correct type
         if output_type == 'float64':
@@ -470,6 +527,7 @@ class RepairLayer:
             return result.astype('int64')
         else:
             return result.astype(object)
+
 
     def apply_formula_logic(self, df, output_col, method, formula_logic, dependencies, blank_default, data_type=None, static_value=None):
         \"""
