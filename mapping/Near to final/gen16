@@ -786,7 +786,7 @@ if __name__ == '__main__':
     """))
 
         # Save the notebook
-        with open(output_notebook_file, 'w') as f:
+        with open(output_notebook_file, 'w', encoding = 'utf-8') as f:
             nbf.write(nb, f)
 
         print(f"Jupyter notebook has been generated and saved to {output_notebook_file}")
