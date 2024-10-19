@@ -462,7 +462,6 @@ class RepairLayer:
         return result
 
 
-
     def parse_formula(self, formula_logic, df, dependencies, output_type):
         # Mapping for operators
         ops = {
@@ -478,7 +477,7 @@ class RepairLayer:
             return self.handle_if_else_logic(df, formula_logic, output_type)
 
         if 'concat' in formula_logic:
-            return self.handle_concat_logic(formula_logic, df)                                             
+            return self.handle_concat_logic(formula_logic, df)
 
         # Normalize output_type: Treat 'int' and 'int64' the same, and 'float' and 'float64' the same
         if output_type in ['int', 'int64']:
@@ -513,12 +512,12 @@ class RepairLayer:
                         except ValueError:
                             raise ValueError(f"Invalid value: {token}")
 
-                    # If result is None, this is the first operand
-                    if result is None:
-                        result = operand_value
-                    else:
-                        # Apply the current operator between the result and the operand
-                        result = current_operator(result, operand_value)
+                # If result is None, this is the first operand
+                if result is None:
+                    result = operand_value
+                else:
+                    # Apply the current operator between the result and the operand
+                    result = current_operator(result, operand_value)
 
         # Return the result, cast to the correct type
         if output_type == 'float64':
