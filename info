@@ -1,1 +1,23 @@
+import os
+import sys
+import subprocess
+
+def get_app_path(file_name):
+    # This resolves correctly even inside a packaged .exe
+    base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_dir, file_name)
+
+def start_app_in_background(file_name, port):
+    full_path = get_app_path(file_name)
+
+    # Optional debug log
+    with open("launch_log.txt", "a") as f:
+        f.write(f"Launching {full_path} | Exists: {os.path.exists(full_path)}\n")
+
+    command = [
+        sys.executable, "-m", "streamlit", "run", full_path,
+        "--server.port", str(port),
+        "--server.headless", "true"
+    ]
+    subprocess.Popen(command, creationflags=subprocess.CREATE_NEW_CONSOLE)
 
