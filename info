@@ -1,23 +1,32 @@
-import os
-import sys
-import subprocess
+import streamlit as st
+import pandas as pd
+import tempfile
+from Excel_Regression_Dashboard_automation import main
 
-def get_app_path(file_name):
-    # This resolves correctly even inside a packaged .exe
-    base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base_dir, file_name)
+st.title("Regression Dashboard Excel Creation")
 
-def start_app_in_background(file_name, port):
-    full_path = get_app_path(file_name)
+template_file     = st.file_uploader("Excel Template Path:", type=["xlsx", "xlsm"])
+consol_file       = st.file_uploader("Consol Workbook Template Path:", type=["xlsx", "xlsm"])
+output_file       = st.file_uploader("Output Folder:", type=["xlsx", "xlsm"])
 
-    # Optional debug log
-    with open("launch_log.txt", "a") as f:
-        f.write(f"Launching {full_path} | Exists: {os.path.exists(full_path)}\n")
+if st.button("Create Excel Dashboards"):
+    if not template_file or not consol_file or not output_file:
+        st.error("Please upload all required files.")
+    else:
+        # Save files to temp paths
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsm") as tf1:
+            tf1.write(template_file.read())
+            template_path = tf1.name
 
-    command = [
-        sys.executable, "-m", "streamlit", "run", full_path,
-        "--server.port", str(port),
-        "--server.headless", "true"
-    ]
-    subprocess.Popen(command, creationflags=subprocess.CREATE_NEW_CONSOLE)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsm") as tf2:
+            tf2.write(consol_file.read())
+            consol_path = tf2.name
 
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsm") as tf3:
+            tf3.write(output_file.read())
+            output_path = tf3.name
+
+        # Call your main function with file paths
+        main(template_path, output_path, consol_path)
+
+        st.success("Excel Dashboard created successfully.")
